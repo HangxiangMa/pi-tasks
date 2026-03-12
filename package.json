@@ -39,6 +39,7 @@
   "pi": {
     "extensions": [
       "./src/index.ts"
-    ]
+    ],
+    "image": "https://github.com/tintinweb/pi-tasks/raw/master/media/screenshot.png"
   }
 }
