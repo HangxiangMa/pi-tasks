@@ -4,6 +4,12 @@ A [pi](https://pi.dev) extension that brings **Claude Code-style task tracking a
 
 > **Status:** Early release.
 
+
+
+https://github.com/user-attachments/assets/86b09bd1-6882-4b0c-be20-ea866dd44b6a
+
+
+
 ## Features
 
 - **6 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop` — matching Claude Code's exact tool specs and descriptions
