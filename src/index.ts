@@ -8,6 +8,7 @@
  *   TaskUpdate   — Update task fields, status, dependencies
  *   TaskOutput   — Get output from a background task process
  *   TaskStop     — Stop a running background task process
+ *   TaskExecute  — Execute tasks as subagents (requires pi-chonky-subagents)
  *
  * Commands:
  *   /tasks       — Interactive task management menu
