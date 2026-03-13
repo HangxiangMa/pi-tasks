@@ -1,4 +1,4 @@
-# pi-chonky-tasks
+# @tintinweb/pi-tasks
 
 A [pi](https://pi.dev) extension that brings **Claude Code-style task tracking and coordination** to pi. Track multi-step work with structured tasks, dependency management, and a persistent visual widget.
 
@@ -227,7 +227,7 @@ src/
 ```bash
 npm install
 npm run typecheck   # TypeScript validation
-npm test            # Run unit tests (27 tests)
+npm test            # Run unit tests (102 tests)
 ```
 
 ## License
