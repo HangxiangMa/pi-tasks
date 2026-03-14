@@ -169,7 +169,7 @@ export class TaskWidget {
         if (isActive) {
           icon = theme.fg("accent", spinnerChar);
         } else if (task.status === "completed") {
-          icon = theme.fg("green", "✔");
+          icon = theme.fg("success", "✔");
         } else if (task.status === "in_progress") {
           icon = theme.fg("accent", "◼");
         } else {

@@ -40,6 +40,7 @@
     "extensions": [
       "./src/index.ts"
     ],
+    "video": "https://github.com/tintinweb/pi-tasks/raw/master/media/demo.mp4",
     "image": "https://github.com/tintinweb/pi-tasks/raw/master/media/screenshot.png"
   }
 }

@@ -6,7 +6,7 @@ A [pi](https://pi.dev) extension that brings **Claude Code-style task tracking a
 
 <img width="600" alt="pi-tasks screenshot" src="https://github.com/tintinweb/pi-tasks/raw/master/media/screenshot.png" />
 
-https://github.com/user-attachments/assets/86b09bd1-6882-4b0c-be20-ea866dd44b6a
+https://github.com/user-attachments/assets/1d0ee87a-e0a5-4bfa-a9b9-2f9144cb905b
 
 
 
