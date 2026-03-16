@@ -38,7 +38,7 @@ function renderWidget(state: ReturnType<typeof mockUICtx>["state"]): string[] {
   const entry = state.widgets.get("tasks");
   if (!entry?.content) return [];
   const theme = mockTheme();
-  const tui = { terminal: { columns: 200 } };
+  const tui = { terminal: { columns: 200 }, requestRender() {} };
   const result = entry.content(tui, theme);
   return result.render();
 }

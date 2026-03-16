@@ -19,7 +19,10 @@ import { Type } from "@sinclair/typebox";
 import { TaskStore } from "./task-store.js";
 import { ProcessTracker } from "./process-tracker.js";
 import { TaskWidget, type UICtx } from "./ui/task-widget.js";
+import { loadTasksConfig } from "./tasks-config.js";
+import { openSettingsMenu } from "./ui/settings-menu.js";
 import { randomUUID } from "node:crypto";
+import { join, resolve } from "node:path";
 
 // ---- Helpers ----
 
@@ -38,14 +41,22 @@ The task tools haven't been used recently. If you're working on tasks that would
 </system-reminder>`;
 
 export default function (pi: ExtensionAPI) {
-  // Initialize store: use PI_TASK_LIST_ID for shared/file-backed mode
-  const listId = process.env.PI_TASK_LIST_ID;
-  const store = new TaskStore(listId);
+  // Initialize store and config
+  const cfg = loadTasksConfig();
+  const piTasks = process.env.PI_TASKS;
+  const localTasksPath = join(process.cwd(), ".pi", "tasks", "tasks.json");
+  const store =
+    piTasks === "off"          ? new TaskStore() :
+    piTasks?.startsWith("/")   ? new TaskStore(piTasks) :
+    piTasks?.startsWith(".")   ? new TaskStore(resolve(piTasks)) :
+    piTasks                    ? new TaskStore(piTasks) :
+    cfg.persistTasks === false ? new TaskStore() :
+                                 new TaskStore(localTasksPath);
+
   const tracker = new ProcessTracker();
   const widget = new TaskWidget(store);
 
   // ── Subagent integration state ──
-  let autoCascadeEnabled = false;
   /** Latest ExtensionContext — refreshed on every tool execution so cascade always has a valid one. */
   let latestCtx: ExtensionContext | undefined;
   /** Cascade config — set by TaskExecute, consumed by completion listener. */
@@ -111,7 +122,7 @@ export default function (pi: ExtensionAPI) {
     widget.setActiveTask(task.id, false);
 
     // Auto-cascade: find unblocked dependents with agentType
-    if (autoCascadeEnabled && cascadeConfig && latestCtx) {
+    if ((cfg.autoCascade ?? false) && cascadeConfig && latestCtx) {
       const unblocked = store.list().filter(t =>
         t.status === "pending" &&
         t.metadata?.agentType &&
@@ -196,44 +207,6 @@ export default function (pi: ExtensionAPI) {
     lastTaskToolUseTurn = currentTurn;
     return {
       content: [...event.content, { type: "text" as const, text: SYSTEM_REMINDER }],
-    };
-  });
-
-  // ── Task state in system prompt ──
-  // Appends current task state to the system prompt on every agent loop.
-  // Ensures the LLM always has task awareness — especially important after
-  // context compaction, when prior task tool results may have been dropped.
-  pi.on("before_agent_start", async (event) => {
-    const tasks = store.list();
-    if (tasks.length === 0) return {};
-
-    const taskSummary = tasks.map(t => {
-      let line = `#${t.id} [${t.status}] ${t.subject}`;
-      if (t.owner) line += ` (${t.owner})`;
-      if (t.blockedBy.length > 0) {
-        const openBlockers = t.blockedBy.filter(bid => {
-          const blocker = store.get(bid);
-          return blocker && blocker.status !== "completed";
-        });
-        if (openBlockers.length > 0) {
-          line += ` [blocked by ${openBlockers.map(id => "#" + id).join(", ")}]`;
-        }
-      }
-      // Mark agent-typed pending tasks with all deps completed as READY
-      if (t.status === "pending" && t.metadata?.agentType) {
-        const allDepsCompleted = t.blockedBy.length === 0 || t.blockedBy.every(bid => {
-          const blocker = store.get(bid);
-          return blocker && blocker.status === "completed";
-        });
-        if (allDepsCompleted) {
-          line += ` [READY — use TaskExecute to start]`;
-        }
-      }
-      return line;
-    }).join("\n");
-
-    return {
-      systemPrompt: event.systemPrompt + `\n\n<task-state>\nCurrent tasks:\n${taskSummary}\n</task-state>`,
     };
   });
 
@@ -449,6 +422,10 @@ Returns full task details:
     description: `Use this tool to update a task in the task list.
 
 ## When to Use This Tool
+
+**Before starting work on a task:**
+- Mark it in_progress BEFORE beginning — do not start work without updating status first
+- After resolving, call TaskList to find your next task
 
 **Mark tasks as resolved:**
 - When you have completed the work described in a task
@@ -842,17 +819,8 @@ Set up task dependencies:
         return viewTasks();
       };
 
-      const settingsMenu = async (): Promise<void> => {
-        const cascadeLabel = `Auto-execute tasks with agents: ${autoCascadeEnabled ? "ON" : "OFF"}`;
-        const choices = [cascadeLabel, "← Back"];
-        const selected = await ui.select("Settings", choices);
-        if (!selected || selected === "← Back") return mainMenu();
-        if (selected === cascadeLabel) {
-          autoCascadeEnabled = !autoCascadeEnabled;
-          return settingsMenu();
-        }
-        return mainMenu();
-      };
+      const settingsMenu = (): Promise<void> =>
+        openSettingsMenu(ui, cfg, mainMenu);
 
       const createTask = async (): Promise<void> => {
         const subject = await ui.input("Task subject");

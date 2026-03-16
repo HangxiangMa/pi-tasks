@@ -8,6 +8,11 @@ import { TaskStore } from "../src/task-store.js";
 import { TaskWidget, type UICtx, type Theme } from "../src/ui/task-widget.js";
 import initExtension from "../src/index.js";
 
+// Force in-memory task store for all integration tests — prevents file-backed
+// store from loading stale tasks across test instances.
+beforeEach(() => { process.env.PI_TASKS = "off"; });
+afterEach(() => { delete process.env.PI_TASKS; });
+
 // ---- Mock pi ----
 
 /** Minimal mock of ExtensionAPI with events, tool capture, and event hooks. */
@@ -428,80 +433,6 @@ describe("Auto-cascade", () => {
   });
 });
 
-describe("System prompt READY tags", () => {
-  it("marks unblocked agent-typed pending tasks as READY", async () => {
-    // Capture return values from lifecycle handlers
-    const lifecycleHandlers: Array<(...args: any[]) => any> = [];
-    const mock = mockPi();
-    const origOn = mock.pi.on.bind(mock.pi);
-    mock.pi.on = ((event: string, handler: any) => {
-      origOn(event, handler);
-      if (event === "before_agent_start") lifecycleHandlers.push(handler);
-    }) as any;
-
-    initExtension(mock.pi as any);
-
-    await mock.executeTool("TaskCreate", {
-      subject: "Ready task",
-      description: "Desc",
-      agentType: "general-purpose",
-    });
-
-    // Call the before_agent_start handler directly to get its return value
-    const result = await lifecycleHandlers[0]({ systemPrompt: "base" });
-    expect(result.systemPrompt).toContain("[READY — use TaskExecute to start]");
-    expect(result.systemPrompt).toContain("Ready task");
-  });
-
-  it("does not mark blocked agent tasks as READY", async () => {
-    const lifecycleHandlers: Array<(...args: any[]) => any> = [];
-    const mock = mockPi();
-    const origOn = mock.pi.on.bind(mock.pi);
-    mock.pi.on = ((event: string, handler: any) => {
-      origOn(event, handler);
-      if (event === "before_agent_start") lifecycleHandlers.push(handler);
-    }) as any;
-
-    initExtension(mock.pi as any);
-
-    await mock.executeTool("TaskCreate", {
-      subject: "Blocker",
-      description: "Desc",
-      agentType: "general-purpose",
-    });
-    await mock.executeTool("TaskCreate", {
-      subject: "Blocked task",
-      description: "Desc",
-      agentType: "general-purpose",
-    });
-    await mock.executeTool("TaskUpdate", { taskId: "2", addBlockedBy: ["1"] });
-
-    const result = await lifecycleHandlers[0]({ systemPrompt: "base" });
-    // Task 1 should be READY, task 2 should NOT
-    expect(result.systemPrompt).toContain("#1 [pending] Blocker [READY");
-    expect(result.systemPrompt).not.toContain("#2 [pending] Blocked task [READY");
-  });
-
-  it("does not mark tasks without agentType as READY", async () => {
-    const lifecycleHandlers: Array<(...args: any[]) => any> = [];
-    const mock = mockPi();
-    const origOn = mock.pi.on.bind(mock.pi);
-    mock.pi.on = ((event: string, handler: any) => {
-      origOn(event, handler);
-      if (event === "before_agent_start") lifecycleHandlers.push(handler);
-    }) as any;
-
-    initExtension(mock.pi as any);
-
-    await mock.executeTool("TaskCreate", {
-      subject: "Manual task",
-      description: "Desc",
-    });
-
-    const result = await lifecycleHandlers[0]({ systemPrompt: "base" });
-    expect(result.systemPrompt).not.toContain("READY");
-  });
-});
 
 describe("Standalone operation (no subagents extension)", () => {
   let mock: ReturnType<typeof mockPi>;

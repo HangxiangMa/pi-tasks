@@ -14,9 +14,8 @@ https://github.com/user-attachments/assets/1d0ee87a-e0a5-4bfa-a9b9-2f9144cb905b
 
 - **7 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop`, `TaskExecute` — matching Claude Code's exact tool specs and descriptions
 - **Persistent widget** — live task list above the editor with `✔`/`◼`/`◻` status icons, strikethrough for completed tasks, star spinner (`✳✽`) for active tasks with elapsed time and token counts
-- **System-reminder injection** — periodic `<system-reminder>` nudges appended to tool results when task tools haven't been used recently (matches Claude Code's behavior)
-- **Task state persistence** — current task state injected into system prompt on every agent loop, surviving context compaction
-- **Prompt guidelines** — system prompt guidelines nudge the LLM to use task tools for complex work
+- **System-reminder injection** — periodic `<system-reminder>` nudges appended to tool results when task tools haven't been used recently (matches Claude Code's behavior exactly)
+- **Prompt guidelines** — workflow contract encoded in tool descriptions, nudging the LLM at the point of tool use
 - **Dependency management** — bidirectional `blocks`/`blockedBy` relationships with warnings for cycles, self-deps, and dangling references
 - **Shared task lists** — multiple pi sessions can share a file-backed task list for agent team coordination
 - **File locking** — concurrent access is safe when multiple sessions share a task list
@@ -177,17 +176,33 @@ Tasks are created as `pending`. Mark `in_progress` before starting work, `comple
 - **Raw data preserved:** `TaskGet` shows ALL edges, including completed blockers
 - **Cleanup on deletion:** removing a task cleans up all edges pointing to it
 
-## Shared Task Lists
+## Task Persistence
 
-Set `PI_TASK_LIST_ID` to enable file-backed storage for agent team coordination:
+By default tasks persist locally to `<cwd>/.pi/tasks/tasks.json` and reload on restart. Only `pending` and `in_progress` tasks are saved — completed tasks are in-memory only and pruned automatically.
 
+Settings (`autoCascade`, `persistTasks`) are saved to `<cwd>/.pi/tasks-config.json`.
+
+### Override via environment variables
+
+| Variable | Value | Behaviour |
+|----------|-------|-----------|
+| `PI_TASKS` | `off` | In-memory only (CI/automation) |
+| `PI_TASKS` | `sprint-1` | Named shared list at `~/.pi/tasks/sprint-1.json` |
+| `PI_TASKS` | `/abs/path/tasks.json` | Explicit absolute file path |
+| `PI_TASKS` | `./tasks.json` | Relative path resolved from cwd |
+| *(unset)* | | Default local path `<cwd>/.pi/tasks/tasks.json` |
+
+Named and explicit paths use a file-locked store with stale-lock detection — safe for multiple pi sessions coordinating on the same task list.
+
+**CI example** (`.envrc`):
 ```bash
-PI_TASK_LIST_ID=my-project pi
+export PI_TASKS=off
 ```
 
-Tasks persist at `~/.pi/tasks/my-project.json`. Multiple sessions sharing the same ID read/write the same list with file locking (`.lock` files with stale-lock detection).
-
-Without the env var, tasks are session-scoped (in-memory only).
+**Shared team list** (`.envrc`):
+```bash
+export PI_TASKS=my-project
+```
 
 ## `/tasks` Command
 
@@ -203,7 +218,7 @@ Tasks
 
 - **View all tasks** — select a task to see details and take actions (start, complete, delete)
 - **Create task** — input prompts for subject and description
-- **Settings** — toggle auto-cascade (auto-execute unblocked agent tasks on completion)
+- **Settings** — toggle auto-cascade and task persistence (both survive restarts via `tasks-config.json`)
 - **Clear completed** — remove all completed tasks
 
 ## Cross-extension Communication with [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents)
@@ -261,11 +276,13 @@ If [`pi-subagents`](https://github.com/tintinweb/pi-subagents) is not installed,
 ```
 src/
 ├── index.ts            # Extension entry: 7 tools + /tasks command + widget + subagent integration
-├── types.ts            # Task, TaskStatus, BackgroundProcess, SubagentBridge types
+├── types.ts            # Task, TaskStatus, BackgroundProcess types
 ├── task-store.ts       # File-backed store with CRUD, dependencies, locking
+├── tasks-config.ts     # Config persistence (persistTasks, autoCascade) → .pi/tasks-config.json
 ├── process-tracker.ts  # Background process output buffering and stop
 └── ui/
-    └── task-widget.ts  # Persistent widget with status icons and spinner
+    ├── task-widget.ts  # Persistent widget with status icons and spinner
+    └── settings-menu.ts  # /tasks → Settings panel (SettingsList TUI component)
 ```
 
 ## Future Work
@@ -277,7 +294,7 @@ src/
 ```bash
 npm install
 npm run typecheck   # TypeScript validation
-npm test            # Run unit tests (102 tests)
+npm test            # Run unit tests (116 tests)
 ```
 
 ## License

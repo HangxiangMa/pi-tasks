@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { TaskStore } from "../src/task-store.js";
-import { existsSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, rmSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 
 describe("TaskStore (in-memory)", () => {
   let store: TaskStore;
@@ -337,13 +338,41 @@ describe("TaskStore (file-backed)", () => {
     expect(tasks[0].subject).toBe("Persistent task");
   });
 
-  it("persists updates to disk", () => {
+  it("persists in_progress updates to disk", () => {
     const store1 = new TaskStore(testListId);
     store1.create("Task", "Desc");
+    store1.update("1", { status: "in_progress" });
+
+    const store2 = new TaskStore(testListId);
+    expect(store2.get("1")!.status).toBe("in_progress");
+  });
+
+  it("does not persist completed tasks to disk", () => {
+    const store1 = new TaskStore(testListId);
+    store1.create("Done task", "Desc");
+    store1.create("Pending task", "Desc");
     store1.update("1", { status: "completed" });
 
     const store2 = new TaskStore(testListId);
-    expect(store2.get("1")!.status).toBe("completed");
+    expect(store2.get("1")).toBeUndefined();
+    expect(store2.get("2")).toBeDefined();
+    expect(store2.list()).toHaveLength(1);
+  });
+
+  it("only restores pending and in_progress tasks across instances", () => {
+    const store1 = new TaskStore(testListId);
+    store1.create("Pending", "Desc");
+    store1.create("In progress", "Desc");
+    store1.create("Done", "Desc");
+    store1.update("2", { status: "in_progress" });
+    store1.update("3", { status: "completed" });
+
+    const store2 = new TaskStore(testListId);
+    const tasks = store2.list();
+    expect(tasks).toHaveLength(2);
+    expect(tasks.map(t => t.id)).toContain("1");
+    expect(tasks.map(t => t.id)).toContain("2");
+    expect(tasks.map(t => t.id)).not.toContain("3");
   });
 
   it("persists ID counter across instances", () => {
@@ -354,5 +383,35 @@ describe("TaskStore (file-backed)", () => {
     const store2 = new TaskStore(testListId);
     const t3 = store2.create("Task 3", "Desc");
     expect(t3.id).toBe("3");
+  });
+});
+
+describe("TaskStore (absolute path)", () => {
+  const absFilePath = join(tmpdir(), `pi-tasks-test-${Date.now()}.json`);
+
+  afterEach(() => {
+    try { rmSync(absFilePath); } catch { /* */ }
+    try { rmSync(absFilePath + ".lock"); } catch { /* */ }
+    try { rmSync(absFilePath + ".tmp"); } catch { /* */ }
+  });
+
+  it("accepts absolute path and persists tasks", () => {
+    const store1 = new TaskStore(absFilePath);
+    store1.create("Abs path task", "Desc");
+
+    const store2 = new TaskStore(absFilePath);
+    expect(store2.list()).toHaveLength(1);
+    expect(store2.list()[0].subject).toBe("Abs path task");
+  });
+
+  it("does not persist completed tasks when using absolute path", () => {
+    const store1 = new TaskStore(absFilePath);
+    store1.create("Pending", "Desc");
+    store1.create("Completed", "Desc");
+    store1.update("2", { status: "completed" });
+
+    const raw = JSON.parse(readFileSync(absFilePath, "utf-8"));
+    expect(raw.tasks).toHaveLength(1);
+    expect(raw.tasks[0].id).toBe("1");
   });
 });

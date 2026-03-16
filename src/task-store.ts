@@ -6,7 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import type { Task, TaskStatus, TaskStoreData } from "./types.js";
 
@@ -51,7 +51,6 @@ function isProcessRunning(pid: number): boolean {
 }
 
 export class TaskStore {
-  private listId: string | undefined;
   private filePath: string | undefined;
   private lockPath: string | undefined;
 
@@ -59,14 +58,14 @@ export class TaskStore {
   private nextId = 1;
   private tasks = new Map<string, Task>();
 
-  constructor(listId?: string) {
-    this.listId = listId;
-    if (listId) {
-      mkdirSync(TASKS_DIR, { recursive: true });
-      this.filePath = join(TASKS_DIR, `${listId}.json`);
-      this.lockPath = this.filePath + ".lock";
-      this.load();
-    }
+  constructor(listIdOrPath?: string) {
+    if (!listIdOrPath) return;
+    const isAbsPath = isAbsolute(listIdOrPath);
+    const filePath = isAbsPath ? listIdOrPath : join(TASKS_DIR, `${listIdOrPath}.json`);
+    mkdirSync(dirname(filePath), { recursive: true });
+    this.filePath = filePath;
+    this.lockPath = filePath + ".lock";
+    this.load();
   }
 
   /** Read store from disk (file-backed mode only). */
@@ -83,12 +82,12 @@ export class TaskStore {
     } catch { /* corrupt file — start fresh */ }
   }
 
-  /** Write store to disk atomically (file-backed mode only). */
+  /** Write store to disk atomically (file-backed mode only). Completed tasks are not persisted. */
   private save(): void {
     if (!this.filePath) return;
     const data: TaskStoreData = {
       nextId: this.nextId,
-      tasks: Array.from(this.tasks.values()),
+      tasks: Array.from(this.tasks.values()).filter(t => t.status !== "completed"),
     };
     const tmpPath = this.filePath + ".tmp";
     writeFileSync(tmpPath, JSON.stringify(data, null, 2));

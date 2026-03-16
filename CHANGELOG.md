@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-03-16
+
+### Added
+- **Local-by-default task persistence** — tasks now auto-persist to `<cwd>/.pi/tasks/tasks.json` on every mutation and reload on restart. No config needed. Set `PI_TASKS=off` to opt out (CI/automation).
+- **Settings persistence** — `persistTasks` and `autoCascade` settings survive restarts via `<cwd>/.pi/tasks-config.json`.
+- **"Persist tasks" toggle in Settings** — `/tasks` → Settings now shows two toggles: auto-execute and persist. Both are saved immediately to `tasks-config.json`.
+- **Completed tasks excluded from disk** — only `pending` and `in_progress` tasks are written to disk. Completed tasks are in-memory only and pruned on restart.
+- **Absolute path support** — `TaskStore` now accepts an absolute file path in addition to a short list ID.
+
+### Changed
+- **⚠ BREAKING: `PI_TASKS_FILE` / `PI_TASKS_LIST` → `PI_TASKS`** — two env vars consolidated into one. Values: `off` (in-memory), `sprint-1` (named list → `~/.pi/tasks/sprint-1.json`), `/abs/path` (absolute), `./rel/path` (relative to cwd). `PI_TASKS_LIST=name` users: rename to `PI_TASKS=name`.
+- **Settings menu** — extracted to `src/ui/settings-menu.ts` and rebuilt using `ui.custom()` + `SettingsList` for native TUI rendering: keyboard navigation, live toggle, per-row descriptions, theme-consistent styling.
+- **`autoCascade` setting** — now loaded from `tasks-config.json` on startup so the toggle survives restarts.
+- **Hardened `TaskUpdate` description** — added "Before starting work on a task: mark it `in_progress` BEFORE beginning" as an explicit use case. Previously this rule only appeared in `TaskCreate`; now it lives in the tool actually used to set that status.
+- **Removed `before_agent_start` system prompt injection** — task state is no longer injected into the system prompt on every agent loop. Analysis showed this creates wallpaper noise that trains the model to ignore the task block. Claude Code itself does not do this: the workflow contract lives in tool descriptions (read at decision time) and the periodic `<system-reminder>` nudge (fired when task tools haven't been used recently). Removed the corresponding 3 tests.
+- **Widget render-once refactor** — `TaskWidget` now registers the widget callback a single time and uses `tui.requestRender()` for subsequent updates instead of calling `setWidget()` on every tick. Rendering logic extracted to `renderWidget()`. Eliminates redundant callback re-registration and keeps a cached `tui` reference for lightweight invalidation.
+
 ## [0.3.0] - 2026-03-14
 
 ### Changed
@@ -51,6 +68,7 @@ Initial release — Claude Code-style task tracking and coordination for pi.
 - **Background process tracker** — output buffering (stdout + stderr), waiter notification, graceful stop with timeout escalation (SIGTERM → 5s → SIGKILL).
 - **78 unit tests** — task store CRUD, dependencies, warnings, file persistence; widget rendering, icons, spinners, token/duration formatting; process tracker lifecycle.
 
+[0.3.1]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.1
 [0.3.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.1.0

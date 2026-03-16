@@ -68,6 +68,10 @@ export class TaskWidget {
   private activeTaskIds = new Set<string>();
   /** Per-task runtime metrics keyed by task ID. */
   private metrics = new Map<string, TaskMetrics>();
+  /** Cached TUI instance for requestRender() calls. */
+  private tui: any | undefined;
+  /** Whether the widget callback is currently registered. */
+  private widgetRegistered = false;
 
   constructor(private store: TaskStore) {}
 
@@ -108,30 +112,107 @@ export class TaskWidget {
     }
   }
 
+  /** Build widget lines from current live state. Called from the render callback. */
+  private renderWidget(tui: any, theme: Theme): string[] {
+    const tasks = this.store.list();
+    const w = tui.terminal.columns;
+    const truncate = (line: string) => truncateToWidth(line, w);
+
+    if (tasks.length === 0) return [];
+
+    const completed = tasks.filter(t => t.status === "completed");
+    const inProgress = tasks.filter(t => t.status === "in_progress");
+    const pending = tasks.filter(t => t.status === "pending");
+
+    const parts: string[] = [];
+    if (completed.length > 0) parts.push(`${completed.length} done`);
+    if (inProgress.length > 0) parts.push(`${inProgress.length} in progress`);
+    if (pending.length > 0) parts.push(`${pending.length} open`);
+    const statusText = `${tasks.length} tasks (${parts.join(", ")})`;
+
+    const spinnerChar = SPINNER[this.widgetFrame % SPINNER.length];
+    const lines: string[] = [truncate(theme.fg("accent", "●") + " " + theme.fg("accent", statusText))];
+
+    const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
+    for (let i = 0; i < visible.length; i++) {
+      const task = visible[i];
+      const isActive = this.activeTaskIds.has(task.id) && task.status === "in_progress";
+
+      let icon: string;
+      if (isActive) {
+        icon = theme.fg("accent", spinnerChar);
+      } else if (task.status === "completed") {
+        icon = theme.fg("success", "✔");
+      } else if (task.status === "in_progress") {
+        icon = theme.fg("accent", "◼");
+      } else {
+        icon = "◻";
+      }
+
+      let suffix = "";
+      if (task.status === "pending" && task.blockedBy.length > 0) {
+        const openBlockers = task.blockedBy.filter(bid => {
+          const blocker = this.store.get(bid);
+          return blocker && blocker.status !== "completed";
+        });
+        if (openBlockers.length > 0) {
+          suffix = theme.fg("dim", ` › blocked by ${openBlockers.map(id => "#" + id).join(", ")}`);
+        }
+      }
+
+      let text: string;
+      if (isActive) {
+        const form = task.activeForm || task.subject;
+        const agentId = task.metadata?.agentId;
+        const agentLabel = agentId ? ` (agent ${agentId.slice(0, 5)})` : "";
+        const m = this.metrics.get(task.id);
+        let stats = "";
+        if (m) {
+          const elapsed = formatDuration(Date.now() - m.startedAt);
+          const tokenParts: string[] = [];
+          if (m.inputTokens > 0) tokenParts.push(`↑ ${formatTokens(m.inputTokens)}`);
+          if (m.outputTokens > 0) tokenParts.push(`↓ ${formatTokens(m.outputTokens)}`);
+          stats = tokenParts.length > 0
+            ? ` ${theme.fg("dim", `(${elapsed} · ${tokenParts.join(" ")})`)}`
+            : ` ${theme.fg("dim", `(${elapsed})`)}`;
+        }
+        text = `  ${icon} ${theme.fg("accent", form + agentLabel + "…")}${stats}`;
+      } else if (task.status === "completed") {
+        text = `  ${icon} ${theme.fg("dim", theme.strikethrough(task.subject))}`;
+      } else {
+        const agentSuffix = task.status === "in_progress" && task.metadata?.agentId
+          ? theme.fg("dim", ` (agent ${task.metadata.agentId.slice(0, 5)})`)
+          : "";
+        text = `  ${icon} ${task.subject}${agentSuffix}`;
+      }
+
+      lines.push(truncate(text + suffix));
+    }
+
+    if (tasks.length > MAX_VISIBLE_TASKS) {
+      lines.push(truncate(theme.fg("dim", `    … and ${tasks.length - MAX_VISIBLE_TASKS} more`)));
+    }
+
+    return lines;
+  }
+
   /** Force an immediate widget update. */
   update() {
     if (!this.uiCtx) return;
     const tasks = this.store.list();
 
+    // Transition: visible → hidden
     if (tasks.length === 0) {
-      this.uiCtx.setWidget("tasks", undefined);
+      if (this.widgetRegistered) {
+        this.uiCtx.setWidget("tasks", undefined);
+        this.widgetRegistered = false;
+      }
       if (this.widgetInterval) {
         clearInterval(this.widgetInterval);
         this.widgetInterval = undefined;
       }
       return;
     }
-
-    const completed = tasks.filter(t => t.status === "completed");
-    const inProgress = tasks.filter(t => t.status === "in_progress");
-    const pending = tasks.filter(t => t.status === "pending");
-
-    // Status summary (widget header only, not status bar)
-    const parts: string[] = [];
-    if (completed.length > 0) parts.push(`${completed.length} done`);
-    if (inProgress.length > 0) parts.push(`${inProgress.length} in progress`);
-    if (pending.length > 0) parts.push(`${pending.length} open`);
-    const statusText = `${tasks.length} tasks (${parts.join(", ")})`;
 
     // Prune stale active IDs (deleted or no longer in_progress)
     for (const id of this.activeTaskIds) {
@@ -152,77 +233,18 @@ export class TaskWidget {
     }
 
     this.widgetFrame++;
-    const spinnerChar = SPINNER[this.widgetFrame % SPINNER.length];
 
-    this.uiCtx.setWidget("tasks", (tui, theme) => {
-      const w = tui.terminal.columns;
-      const truncate = (line: string) => truncateToWidth(line, w);
-
-      const lines: string[] = [truncate(theme.fg("accent", "●") + " " + theme.fg("accent", statusText))];
-
-      const visible = tasks.slice(0, MAX_VISIBLE_TASKS);
-      for (let i = 0; i < visible.length; i++) {
-        const task = visible[i];
-        const isActive = this.activeTaskIds.has(task.id) && task.status === "in_progress";
-
-        let icon: string;
-        if (isActive) {
-          icon = theme.fg("accent", spinnerChar);
-        } else if (task.status === "completed") {
-          icon = theme.fg("success", "✔");
-        } else if (task.status === "in_progress") {
-          icon = theme.fg("accent", "◼");
-        } else {
-          icon = "◻";
-        }
-
-        let suffix = "";
-        // Show blocked-by info for pending tasks (only non-completed blockers)
-        if (task.status === "pending" && task.blockedBy.length > 0) {
-          const openBlockers = task.blockedBy.filter(bid => {
-            const blocker = this.store.get(bid);
-            return blocker && blocker.status !== "completed";
-          });
-          if (openBlockers.length > 0) {
-            suffix = theme.fg("dim", ` › blocked by ${openBlockers.map(id => "#" + id).join(", ")}`);
-          }
-        }
-
-        let text: string;
-        if (isActive) {
-          const form = task.activeForm || task.subject;
-          const agentId = task.metadata?.agentId;
-          const agentLabel = agentId ? ` (agent ${agentId.slice(0, 5)})` : "";
-          const m = this.metrics.get(task.id);
-          let stats = "";
-          if (m) {
-            const elapsed = formatDuration(Date.now() - m.startedAt);
-            const tokenParts: string[] = [];
-            if (m.inputTokens > 0) tokenParts.push(`↑ ${formatTokens(m.inputTokens)}`);
-            if (m.outputTokens > 0) tokenParts.push(`↓ ${formatTokens(m.outputTokens)}`);
-            stats = tokenParts.length > 0
-              ? ` ${theme.fg("dim", `(${elapsed} · ${tokenParts.join(" ")})`)}`
-              : ` ${theme.fg("dim", `(${elapsed})`)}`;
-          }
-          text = `  ${icon} ${theme.fg("accent", form + agentLabel + "…")}${stats}`;
-        } else if (task.status === "completed") {
-          text = `  ${icon} ${theme.fg("dim", theme.strikethrough(task.subject))}`;
-        } else {
-          const agentSuffix = task.status === "in_progress" && task.metadata?.agentId
-            ? theme.fg("dim", ` (agent ${task.metadata.agentId.slice(0, 5)})`)
-            : "";
-          text = `  ${icon} ${task.subject}${agentSuffix}`;
-        }
-
-        lines.push(truncate(text + suffix));
-      }
-
-      if (tasks.length > MAX_VISIBLE_TASKS) {
-        lines.push(truncate(theme.fg("dim", `    … and ${tasks.length - MAX_VISIBLE_TASKS} more`)));
-      }
-
-      return { render: () => lines, invalidate: () => {} };
-    }, { placement: "aboveEditor" });
+    // Transition: hidden → visible — register widget callback once
+    if (!this.widgetRegistered) {
+      this.uiCtx.setWidget("tasks", (tui, theme) => {
+        this.tui = tui;
+        return { render: () => this.renderWidget(tui, theme), invalidate: () => {} };
+      }, { placement: "aboveEditor" });
+      this.widgetRegistered = true;
+    } else if (this.tui) {
+      // Widget already registered — just request a re-render
+      this.tui.requestRender();
+    }
   }
 
   dispose() {
@@ -233,5 +255,7 @@ export class TaskWidget {
     if (this.uiCtx) {
       this.uiCtx.setWidget("tasks", undefined);
     }
+    this.widgetRegistered = false;
+    this.tui = undefined;
   }
 }
