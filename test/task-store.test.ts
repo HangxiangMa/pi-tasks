@@ -347,19 +347,20 @@ describe("TaskStore (file-backed)", () => {
     expect(store2.get("1")!.status).toBe("in_progress");
   });
 
-  it("does not persist completed tasks to disk", () => {
+  it("persists completed tasks to disk", () => {
     const store1 = new TaskStore(testListId);
     store1.create("Done task", "Desc");
     store1.create("Pending task", "Desc");
     store1.update("1", { status: "completed" });
 
     const store2 = new TaskStore(testListId);
-    expect(store2.get("1")).toBeUndefined();
+    expect(store2.get("1")).toBeDefined();
+    expect(store2.get("1")!.status).toBe("completed");
     expect(store2.get("2")).toBeDefined();
-    expect(store2.list()).toHaveLength(1);
+    expect(store2.list()).toHaveLength(2);
   });
 
-  it("only restores pending and in_progress tasks across instances", () => {
+  it("restores all tasks across instances", () => {
     const store1 = new TaskStore(testListId);
     store1.create("Pending", "Desc");
     store1.create("In progress", "Desc");
@@ -369,10 +370,10 @@ describe("TaskStore (file-backed)", () => {
 
     const store2 = new TaskStore(testListId);
     const tasks = store2.list();
-    expect(tasks).toHaveLength(2);
+    expect(tasks).toHaveLength(3);
     expect(tasks.map(t => t.id)).toContain("1");
     expect(tasks.map(t => t.id)).toContain("2");
-    expect(tasks.map(t => t.id)).not.toContain("3");
+    expect(tasks.map(t => t.id)).toContain("3");
   });
 
   it("persists ID counter across instances", () => {
@@ -404,14 +405,13 @@ describe("TaskStore (absolute path)", () => {
     expect(store2.list()[0].subject).toBe("Abs path task");
   });
 
-  it("does not persist completed tasks when using absolute path", () => {
+  it("persists completed tasks when using absolute path", () => {
     const store1 = new TaskStore(absFilePath);
     store1.create("Pending", "Desc");
     store1.create("Completed", "Desc");
     store1.update("2", { status: "completed" });
 
     const raw = JSON.parse(readFileSync(absFilePath, "utf-8"));
-    expect(raw.tasks).toHaveLength(1);
-    expect(raw.tasks[0].id).toBe("1");
+    expect(raw.tasks).toHaveLength(2);
   });
 });

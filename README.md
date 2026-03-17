@@ -176,11 +176,19 @@ Tasks are created as `pending`. Mark `in_progress` before starting work, `comple
 - **Raw data preserved:** `TaskGet` shows ALL edges, including completed blockers
 - **Cleanup on deletion:** removing a task cleans up all edges pointing to it
 
-## Task Persistence
+## Task Storage
 
-By default tasks persist locally to `<cwd>/.pi/tasks/tasks.json` and reload on restart. Only `pending` and `in_progress` tasks are saved — completed tasks are in-memory only and pruned automatically.
+Task storage is controlled by the `taskScope` setting (`/tasks` → Settings → Task storage):
 
-Settings (`autoCascade`, `persistTasks`) are saved to `<cwd>/.pi/tasks-config.json`.
+| Mode | File | Behaviour |
+|------|------|-----------|
+| `memory` | *(none)* | In-memory only — tasks lost when session ends |
+| `session` **(default)** | `<cwd>/.pi/tasks/tasks-<sessionId>.json` | Per-session file — isolated between sessions, survives resume |
+| `project` | `<cwd>/.pi/tasks/tasks.json` | Shared across all sessions in the project |
+
+On new session start, if all persisted tasks are completed they are auto-cleared for a clean slate. On session resume, all tasks (including completed) are shown so the user can review progress. Empty session files are automatically deleted when all tasks are cleared.
+
+Settings (`taskScope`, `autoCascade`) are saved to `<cwd>/.pi/tasks-config.json`.
 
 ### Override via environment variables
 
@@ -190,7 +198,7 @@ Settings (`autoCascade`, `persistTasks`) are saved to `<cwd>/.pi/tasks-config.js
 | `PI_TASKS` | `sprint-1` | Named shared list at `~/.pi/tasks/sprint-1.json` |
 | `PI_TASKS` | `/abs/path/tasks.json` | Explicit absolute file path |
 | `PI_TASKS` | `./tasks.json` | Relative path resolved from cwd |
-| *(unset)* | | Default local path `<cwd>/.pi/tasks/tasks.json` |
+| *(unset)* | | Uses `taskScope` setting (default: `session`) |
 
 Named and explicit paths use a file-locked store with stale-lock detection — safe for multiple pi sessions coordinating on the same task list.
 
@@ -212,14 +220,16 @@ Interactive menu:
 Tasks
 ├─ View all tasks (4)
 ├─ Create task
-├─ Settings
-└─ Clear completed (1)
+├─ Clear completed (1)
+├─ Clear all (4)
+└─ Settings
 ```
 
 - **View all tasks** — select a task to see details and take actions (start, complete, delete)
 - **Create task** — input prompts for subject and description
-- **Settings** — toggle auto-cascade and task persistence (both survive restarts via `tasks-config.json`)
 - **Clear completed** — remove all completed tasks
+- **Clear all** — remove all tasks regardless of status
+- **Settings** — configure task storage mode and auto-cascade (saved to `tasks-config.json`)
 
 ## Cross-extension Communication with [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents)
 
@@ -278,7 +288,7 @@ src/
 ├── index.ts            # Extension entry: 7 tools + /tasks command + widget + subagent integration
 ├── types.ts            # Task, TaskStatus, BackgroundProcess types
 ├── task-store.ts       # File-backed store with CRUD, dependencies, locking
-├── tasks-config.ts     # Config persistence (persistTasks, autoCascade) → .pi/tasks-config.json
+├── tasks-config.ts     # Config persistence (taskScope, autoCascade) → .pi/tasks-config.json
 ├── process-tracker.ts  # Background process output buffering and stop
 └── ui/
     ├── task-widget.ts  # Persistent widget with status icons and spinner

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-03-17
+
+### Added
+- **Session-scoped task storage** — new `taskScope` config with three modes: `memory` (in-memory only), `session` (per-session file, default), `project` (shared across sessions). Session mode uses `tasks-<sessionId>.json`, surviving session resume while keeping sessions isolated.
+- **Session resume support** — `session_switch` event handler reloads persisted tasks on resume without auto-clearing completed tasks (user may want to review).
+- **Session file cleanup** — empty session task files are automatically deleted when all tasks are cleared, preventing stale file accumulation.
+- **"Clear all" in `/tasks` menu** — wipe all tasks regardless of status, not just completed ones.
+
+### Changed
+- **Unified storage setting** — replaced `persistTasks` (boolean) with a single `taskScope: "memory" | "session" | "project"` setting. The `persistTasks` field is no longer recognized.
+- **Auto-clear completed on new session start** — when all persisted tasks are completed, they are silently cleared instead of showing stale completed work. On resume, completed tasks are preserved.
+- **Widget only shows on start if there's unfinished work** — sessions with only completed tasks start with a clean slate.
+- **Settings moved to last position** in `/tasks` menu for better UX (actions first, config last).
+
+### Fixed
+- **Robust session store upgrade** — store upgrade from in-memory to file-backed triggers on `turn_start`, `before_agent_start`, `session_switch`, and `tool_execution_start` — whichever fires first.
+
 ## [0.3.2] - 2026-03-17
 
 ### Fixed
@@ -73,6 +90,7 @@ Initial release — Claude Code-style task tracking and coordination for pi.
 - **Background process tracker** — output buffering (stdout + stderr), waiter notification, graceful stop with timeout escalation (SIGTERM → 5s → SIGKILL).
 - **78 unit tests** — task store CRUD, dependencies, warnings, file persistence; widget rendering, icons, spinners, token/duration formatting; process tracker lifecycle.
 
+[0.3.3]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.3
 [0.3.2]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.2
 [0.3.1]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.1
 [0.3.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.0

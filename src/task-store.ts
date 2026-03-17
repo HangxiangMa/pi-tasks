@@ -265,6 +265,22 @@ export class TaskStore {
     });
   }
 
+  /** Remove all tasks. */
+  clearAll(): number {
+    return this.withLock(() => {
+      const count = this.tasks.size;
+      this.tasks.clear();
+      return count;
+    });
+  }
+
+  /** Delete the backing file (if file-backed and empty). */
+  deleteFileIfEmpty(): boolean {
+    if (!this.filePath || this.tasks.size > 0) return false;
+    try { unlinkSync(this.filePath); } catch { /* ignore */ }
+    return true;
+  }
+
   /** Remove all completed tasks. */
   clearCompleted(): number {
     return this.withLock(() => {
