@@ -82,12 +82,12 @@ export class TaskStore {
     } catch { /* corrupt file — start fresh */ }
   }
 
-  /** Write store to disk atomically (file-backed mode only). Completed tasks are not persisted. */
+  /** Write store to disk atomically (file-backed mode only). */
   private save(): void {
     if (!this.filePath) return;
     const data: TaskStoreData = {
       nextId: this.nextId,
-      tasks: Array.from(this.tasks.values()).filter(t => t.status !== "completed"),
+      tasks: Array.from(this.tasks.values()),
     };
     const tmpPath = this.filePath + ".tmp";
     writeFileSync(tmpPath, JSON.stringify(data, null, 2));

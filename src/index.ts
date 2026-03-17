@@ -210,7 +210,15 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
-  // Grab UI + extension context from every tool execution
+  // Grab UI context early — before_agent_start fires before any tool calls,
+  // so persisted tasks show up immediately on session resume.
+  pi.on("before_agent_start", async (_event, ctx) => {
+    latestCtx = ctx;
+    widget.setUICtx(ctx.ui as UICtx);
+    if (store.list().length > 0) widget.update();
+  });
+
+  // Keep latestCtx fresh on every tool execution as well.
   pi.on("tool_execution_start", async (_event, ctx) => {
     latestCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
