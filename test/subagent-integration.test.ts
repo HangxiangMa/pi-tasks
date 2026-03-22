@@ -164,7 +164,7 @@ describe("TaskExecute", () => {
     });
 
     const result = await freshMock.executeTool("TaskExecute", { task_ids: ["1"] });
-    expect(result.content[0].text).toContain("requires the @tintinweb/pi-subagents extension");
+    expect(result.content[0].text).toContain("Subagent execution is currently unavailable");
   });
 
   it("rejects non-existent tasks", async () => {
@@ -505,7 +505,7 @@ describe("Standalone operation (no subagents extension)", () => {
       agentType: "general-purpose",
     });
     const result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
-    expect(result.content[0].text).toContain("requires the @tintinweb/pi-subagents extension");
+    expect(result.content[0].text).toContain("Subagent execution is currently unavailable");
   });
 
   it("subagents lifecycle events are silently ignored without mapped agents", () => {
@@ -607,7 +607,7 @@ describe("RPC protocol correctness", () => {
       agentType: "general-purpose",
     });
     let result = await mock.executeTool("TaskExecute", { task_ids: ["1"] });
-    expect(result.content[0].text).toContain("requires the @tintinweb/pi-subagents extension");
+    expect(result.content[0].text).toContain("Subagent execution is currently unavailable");
 
     // Reset task status
     await mock.executeTool("TaskUpdate", { taskId: "1", status: "pending" });

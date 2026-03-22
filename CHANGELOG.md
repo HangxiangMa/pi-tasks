@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-22
+
 ### Added
 - **RPC-based subagent spawning** — `TaskExecute` now communicates with `@tintinweb/pi-subagents` via a standardized RPC envelope (`rpcCall` helper) with protocol version negotiation and timeout handling.
 - **RPC-based subagent stopping** — `stopSubagent` sends stop requests via `subagents:rpc:stop` event bus RPC.
@@ -109,6 +111,7 @@ Initial release — Claude Code-style task tracking and coordination for pi.
 - **Background process tracker** — output buffering (stdout + stderr), waiter notification, graceful stop with timeout escalation (SIGTERM → 5s → SIGKILL).
 - **78 unit tests** — task store CRUD, dependencies, warnings, file persistence; widget rendering, icons, spinners, token/duration formatting; process tracker lifecycle.
 
+[0.4.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.4.0
 [0.3.3]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.3
 [0.3.2]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.2
 [0.3.1]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.3.1

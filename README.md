@@ -96,7 +96,7 @@ Blocked by: #1
 Blocks: #3
 ```
 
-Shows owner (if set) and ALL dependency edges (including completed blockers) — raw data.
+Shows owner (if set) and open (non-completed) dependency edges. Non-empty metadata is displayed as JSON.
 
 ### `TaskUpdate`
 
@@ -132,17 +132,19 @@ Retrieve output from a background task process.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `task_id` | string | — | Task ID (required) |
+| `task_id` | string | — | Task ID or agent ID (required) |
 | `block` | boolean | `true` | Wait for completion |
 | `timeout` | number | `30000` | Max wait time in ms (max 600000) |
 
+Both task IDs and agent IDs (including partial prefixes) are accepted — agent IDs are resolved via the internal `agentTaskMap`.
+
 ### `TaskStop`
 
-Stop a running background task process. Sends SIGTERM, waits 5 seconds, then SIGKILL.
+Stop a running background task process. Sends SIGTERM, waits 5 seconds, then SIGKILL. For subagent tasks, sends a stop RPC.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `task_id` | string | Task ID to stop |
+| `task_id` | string | Task ID or agent ID to stop |
 
 ### `TaskExecute`
 
@@ -199,6 +201,7 @@ Settings (`taskScope`, `autoCascade`) are saved to `<cwd>/.pi/tasks-config.json`
 | `PI_TASKS` | `/abs/path/tasks.json` | Explicit absolute file path |
 | `PI_TASKS` | `./tasks.json` | Relative path resolved from cwd |
 | *(unset)* | | Uses `taskScope` setting (default: `session`) |
+| `PI_TASKS_DEBUG` | `1` | Trace RPC communication (request/reply/timeout) and spawn errors to stderr |
 
 Named and explicit paths use a file-locked store with stale-lock detection — safe for multiple pi sessions coordinating on the same task list.
 
@@ -304,7 +307,7 @@ src/
 ```bash
 npm install
 npm run typecheck   # TypeScript validation
-npm test            # Run unit tests (116 tests)
+npm test            # Run unit tests (125 tests)
 ```
 
 ## License
