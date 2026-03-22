@@ -108,6 +108,19 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  /** Stop a subagent via pi.events RPC (requires @tintinweb/pi-subagents extension). */
+  function stopSubagent(agentId: string): Promise<boolean> {
+    const requestId = randomUUID();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => { unsub(); resolve(false); }, 10000);
+      const unsub = pi.events.on(`subagents:rpc:stop:reply:${requestId}`, (p: unknown) => {
+        unsub(); clearTimeout(timer);
+        resolve((p as any).success ?? false);
+      });
+      pi.events.emit("subagents:rpc:stop", { requestId, agentId });
+    });
+  }
+
   /** Build a prompt for a task being executed by a subagent. */
   function buildTaskPrompt(task: { id: string; subject: string; description: string }, additionalContext?: string): string {
     let prompt = `You are executing task #${task.id}: "${task.subject}"\n\n${task.description}`;
@@ -160,17 +173,22 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Failure → store error, revert to pending, don't cascade (branch stops)
+  // Intentional stop (status === "stopped") → mark completed, preserve partial result
   pi.events.on("subagents:failed", (data) => {
-    const { id, error, status } = data as { id: string; error?: string; status: string };
+    const { id, error, result, status } = data as { id: string; error?: string; result?: string; status: string };
     const taskId = agentTaskMap.get(id);
     if (!taskId) return;
     agentTaskMap.delete(id);
     const task = store.get(taskId);
     if (!task) return;
-    store.update(task.id, {
-      status: "pending",
-      metadata: { ...task.metadata, lastError: error || status },
-    });
+
+    if (status === "stopped") {
+      // Intentional stop — mark completed, preserve partial result
+      store.update(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
+    } else {
+      // Actual error — revert to pending
+      store.update(task.id, { status: "pending", metadata: { ...task.metadata, lastError: error || status } });
+    }
     widget.setActiveTask(task.id, false);
     widget.update();
   });
@@ -630,6 +648,31 @@ Set up task dependencies:
 
       const processOutput = tracker.getOutput(task_id);
       if (!processOutput) {
+        // No shell process — check if this is a subagent task
+        const task = store.get(task_id);
+        if (!task) throw new Error(`No task found with ID ${task_id}`);
+
+        if (task.metadata?.agentId) {
+          // Subagent task — wait for completion if blocking
+          if (block && task.status === "in_progress") {
+            await new Promise<void>((resolve) => {
+              const timer = setTimeout(() => { unsubOk(); unsubFail(); resolve(); }, timeout ?? 30000);
+              const cleanup = () => { clearTimeout(timer); resolve(); };
+              const unsubOk = pi.events.on("subagents:completed", (d: unknown) => {
+                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
+              });
+              const unsubFail = pi.events.on("subagents:failed", (d: unknown) => {
+                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
+              });
+              // Re-check in case status changed between the outer check and listener registration
+              const current = store.get(task_id);
+              if (current && current.status !== "in_progress") { unsubOk(); unsubFail(); cleanup(); }
+              signal?.addEventListener("abort", () => { unsubOk(); unsubFail(); cleanup(); }, { once: true });
+            });
+          }
+          const updated = store.get(task_id) ?? task;
+          return textResult(`Task #${task_id} [${updated.status}] — subagent ${task.metadata.agentId}`);
+        }
         throw new Error(`No background process for task ${task_id}`);
       }
 
@@ -671,6 +714,15 @@ Set up task dependencies:
 
       const stopped = await tracker.stop(taskId);
       if (!stopped) {
+        // No shell process — check if this is a subagent task
+        const task = store.get(taskId);
+        if (task?.metadata?.agentId && task.status === "in_progress") {
+          store.update(taskId, { status: "completed" });
+          await stopSubagent(task.metadata.agentId);
+          widget.setActiveTask(taskId, false);
+          widget.update();
+          return textResult(`Task #${taskId} stopped successfully`);
+        }
         throw new Error(`No running background process for task ${taskId}`);
       }
 
