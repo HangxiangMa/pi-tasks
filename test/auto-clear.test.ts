@@ -9,7 +9,7 @@ describe("auto-clear: on_task_complete mode", () => {
 
   beforeEach(() => {
     store = new TaskStore();
-    manager = new AutoClearManager(store, () => "on_task_complete");
+    manager = new AutoClearManager(() => store, () => "on_task_complete");
   });
 
   it("does not clear completed task before REMINDER_INTERVAL turns", () => {
@@ -98,7 +98,7 @@ describe("auto-clear: on_list_complete mode", () => {
 
   beforeEach(() => {
     store = new TaskStore();
-    manager = new AutoClearManager(store, () => "on_list_complete");
+    manager = new AutoClearManager(() => store, () => "on_list_complete");
   });
 
   it("does not clear when some tasks are still pending", () => {
@@ -187,7 +187,7 @@ describe("auto-clear: never mode", () => {
 
   beforeEach(() => {
     store = new TaskStore();
-    manager = new AutoClearManager(store, () => "never");
+    manager = new AutoClearManager(() => store, () => "never");
   });
 
   it("never clears completed tasks regardless of turns", () => {
@@ -218,7 +218,7 @@ describe("auto-clear: dynamic mode switching", () => {
   it("respects mode changes via getMode callback", () => {
     const store = new TaskStore();
     let mode: AutoClearMode = "never";
-    const manager = new AutoClearManager(store, () => mode);
+    const manager = new AutoClearManager(() => store, () => mode);
 
     store.create("Task", "Desc");
     store.update("1", { status: "completed" });
@@ -236,10 +236,45 @@ describe("auto-clear: dynamic mode switching", () => {
   });
 });
 
+describe("auto-clear: store getter (session switch)", () => {
+  it("operates on the current store after swap", () => {
+    let store = new TaskStore();
+    const manager = new AutoClearManager(() => store, () => "on_task_complete");
+
+    store.create("Old task", "Desc");
+    store.update("1", { status: "completed" });
+    manager.trackCompletion("1", 1);
+
+    // Simulate session switch — swap store
+    store = new TaskStore();
+    store.create("New task", "Desc");
+    manager.reset();
+
+    // Old task tracking was reset, new store has no completed tasks
+    manager.onTurnStart(5);
+    expect(store.list()).toHaveLength(1);
+    expect(store.get("1")!.subject).toBe("New task");
+  });
+
+  it("clears from new store, not old store", () => {
+    let store = new TaskStore();
+    const manager = new AutoClearManager(() => store, () => "on_task_complete");
+
+    // Swap to new store with a completed task
+    store = new TaskStore();
+    store.create("Task in new store", "Desc");
+    store.update("1", { status: "completed" });
+    manager.trackCompletion("1", 1);
+
+    manager.onTurnStart(5);
+    expect(store.get("1")).toBeUndefined(); // cleared from new store
+  });
+});
+
 describe("auto-clear: reset (new session)", () => {
   it("reset clears per-task tracking so old completions don't fire", () => {
     const store = new TaskStore();
-    const manager = new AutoClearManager(store, () => "on_task_complete");
+    const manager = new AutoClearManager(() => store, () => "on_task_complete");
 
     store.create("Task", "Desc");
     store.update("1", { status: "completed" });
@@ -255,7 +290,7 @@ describe("auto-clear: reset (new session)", () => {
 
   it("reset clears batch countdown so old all-completed state doesn't fire", () => {
     const store = new TaskStore();
-    const manager = new AutoClearManager(store, () => "on_list_complete");
+    const manager = new AutoClearManager(() => store, () => "on_list_complete");
 
     store.create("Task", "Desc");
     store.update("1", { status: "completed" });
@@ -271,7 +306,7 @@ describe("auto-clear: reset (new session)", () => {
 
   it("tracking works normally after reset", () => {
     const store = new TaskStore();
-    const manager = new AutoClearManager(store, () => "on_task_complete");
+    const manager = new AutoClearManager(() => store, () => "on_task_complete");
 
     store.create("Task", "Desc");
     store.update("1", { status: "completed" });

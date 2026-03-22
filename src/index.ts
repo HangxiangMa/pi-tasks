@@ -167,7 +167,7 @@ export default function (pi: ExtensionAPI) {
     return prompt;
   }
 
-  const autoClear = new AutoClearManager(store, () => cfg.autoClearCompleted ?? "on_list_complete", AUTO_CLEAR_DELAY);
+  const autoClear = new AutoClearManager(() => store, () => cfg.autoClearCompleted ?? "on_list_complete", AUTO_CLEAR_DELAY);
 
   // ── Subagent completion listener ──
   // Listens for subagent lifecycle events to update task status and optionally cascade.
@@ -341,13 +341,18 @@ export default function (pi: ExtensionAPI) {
     widget.setUICtx(ctx.ui as UICtx);
 
     const isResume = event?.reason === "resume";
-    if (!isResume) {
-      storeUpgraded = false;
-      persistedTasksShown = false;
-      currentTurn = 0;
-      lastTaskToolUseTurn = 0;
-      reminderInjectedThisCycle = false;
-      autoClear.reset();
+
+    // Reset session-scoped state for both /new and /resume
+    storeUpgraded = false;
+    persistedTasksShown = false;
+    currentTurn = 0;
+    lastTaskToolUseTurn = 0;
+    reminderInjectedThisCycle = false;
+    autoClear.reset();
+
+    // Memory mode has no file-backed store to switch — clear explicitly on /new
+    if (!isResume && taskScope === "memory") {
+      store.clearAll();
     }
 
     upgradeStoreIfNeeded(ctx);

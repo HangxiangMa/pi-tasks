@@ -19,7 +19,7 @@ export class AutoClearManager {
   private allCompletedAtTurn: number | null = null;
 
   constructor(
-    private store: TaskStore,
+    private getStore: () => TaskStore,
     private getMode: () => AutoClearMode,
     /** How many turns completed tasks linger before auto-clearing. */
     private clearDelayTurns = 4,
@@ -39,7 +39,7 @@ export class AutoClearManager {
 
   /** Check if all tasks are completed and start/reset the batch countdown. */
   private checkAllCompleted(currentTurn: number): void {
-    const tasks = this.store.list();
+    const tasks = this.getStore().list();
     if (tasks.length > 0 && tasks.every(t => t.status === "completed")) {
       if (this.allCompletedAtTurn === null) this.allCompletedAtTurn = currentTurn;
     } else {
@@ -68,19 +68,19 @@ export class AutoClearManager {
 
     if (mode === "on_task_complete") {
       for (const [taskId, turn] of this.completedAtTurn) {
-        const task = this.store.get(taskId);
+        const task = this.getStore().get(taskId);
         if (!task || task.status !== "completed") {
           // Task was deleted or reverted — drop stale tracking entry
           this.completedAtTurn.delete(taskId);
         } else if (currentTurn - turn >= this.clearDelayTurns) {
-          this.store.delete(taskId);
+          this.getStore().delete(taskId);
           this.completedAtTurn.delete(taskId);
           cleared = true;
         }
       }
     } else if (mode === "on_list_complete" && this.allCompletedAtTurn !== null) {
       if (currentTurn - this.allCompletedAtTurn >= this.clearDelayTurns) {
-        this.store.clearCompleted();
+        this.getStore().clearCompleted();
         this.allCompletedAtTurn = null;
         cleared = true;
       }
