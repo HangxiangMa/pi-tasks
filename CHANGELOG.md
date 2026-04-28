@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-04-28
+
 ### Added
 - **Cascade dependency-result injection** — when `autoCascade` is enabled, a cascaded subagent's prompt now includes a `## Prerequisite task results` section listing each completed blocker's stored `metadata.result` (capped at 4 KB per dep, with a truncation marker pointing at `TaskGet`). Cascaded agents previously had no context from their prerequisites. (#7)
 
