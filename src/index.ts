@@ -663,10 +663,8 @@ Set up task dependencies:
     parameters: Type.Object({
       taskId: Type.String({ description: "The ID of the task to update" }),
       status: Type.Optional(Type.Unsafe<"pending" | "in_progress" | "completed" | "deleted">({
-        anyOf: [
-          { type: "string", enum: ["pending", "in_progress", "completed"] },
-          { type: "string", const: "deleted" },
-        ],
+        type: "string",
+        enum: ["pending", "in_progress", "completed", "deleted"],
         description: "New status for the task",
       })),
       subject: Type.Optional(Type.String({ description: "New subject for the task" })),
