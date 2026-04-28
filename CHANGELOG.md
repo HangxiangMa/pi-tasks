@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Cascade dependency-result injection** — when `autoCascade` is enabled, a cascaded subagent's prompt now includes a `## Prerequisite task results` section listing each completed blocker's stored `metadata.result` (capped at 4 KB per dep, with a truncation marker pointing at `TaskGet`). Cascaded agents previously had no context from their prerequisites. (#7)
 
+### Performance
+- **Spinner render rate** — reduced widget animation interval from 80 ms (12.5 fps) to 150 ms (~6.7 fps). pi-tui's `requestRender()` triggers a full component-tree re-render with no scoped invalidation, so the spinner alone could drive sustained ~70-100% single-core CPU on long sessions. ~47% fewer renders, well above the perceptual threshold where the twinkling-star animation reads as alive. (#11)
+
 ### Fixed
 - **`TaskUpdate.status` schema** — replaced the `anyOf` of `enum`+`const` shape with a single flat `enum: ["pending", "in_progress", "completed", "deleted"]`. Some LLMs (notably Gemini and earlier Claude variants) parsed the previous shape into double-quoted values like `"\"completed\""`, causing `TaskUpdate` calls to silently fail validation. The accepted value set is unchanged. (#13)
 - **`TaskExecute` `model` parameter now actually forwards** — the `model` option was declared on the tool and captured into the cascade config, but silently dropped at both `spawnSubagent` call sites (initial spawn and cascade). Now propagated end-to-end. (#7)
