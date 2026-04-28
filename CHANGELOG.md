@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-28
+
+### Changed
+- **Bumped `@mariozechner/pi-coding-agent` and `@mariozechner/pi-tui` `^0.62.0` → `^0.70.5`.** Picks up the TypeBox 1.x validator path (pi 0.69), session-replacement context invalidation (pi 0.69), the cwd-bound built-in tool removals (pi 0.68), and the working-indicator / autocomplete-provider APIs along the way. No public surface used by this extension was renamed or removed.
+- **Migrated from `@sinclair/typebox` to `typebox` `^1.1.34`** per the pi 0.69 extension guidance. One-line import change in `src/index.ts`; all `Type.*` calls (`Object`, `String`, `Optional`, `Boolean`, `Number`, `Array`, `Record`, `Any`, `Unsafe`) work unchanged.
+- **Toolchain bumps**: TypeScript `^5` → `^6`, `@types/node` `^20` → `^25`, `@biomejs/biome` `^2.3.5` → `^2.4.13`, `vitest` `^4.0.18` → `^4.1.5`.
+
 ## [0.4.3] - 2026-04-28
 
 ### Added
