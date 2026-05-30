@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Configurable widget display settings** — four new options in `/tasks` → Settings (persisted to `.pi/tasks-config.json`), all defaulting to the previous behaviour: (#22)
+  - `sortOrder` (default `id`) — `id` (creation order), `status` (completed → in-progress → pending), `recent` / `oldest` (by last-updated time). Sort logic lives in `TaskStore.list(sortOrder)`.
+  - `maxVisible` (default `10`) — caps how many task lines the widget shows (`5`–`100`).
+  - `showAll` (default `false`) — when `true`, every task is shown regardless of `maxVisible`.
+  - `hiddenAt` (default `bottom`) — controls whether the `… and N more` overflow collapses from the `bottom` or `top` of the list; `top` pairs with `sortOrder: status` to keep active work visible.
+
 ## [0.6.1] - 2026-05-30
 
 ### Fixed
