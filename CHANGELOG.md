@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-30
+
+### Changed
+- **Migrated pi peer dependencies to the `@earendil-works` scope** — `@mariozechner/pi-coding-agent` and `@mariozechner/pi-tui` (`>=0.70.5`) → `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` (`>=0.74.0`). Package was renamed/rescoped across `package.json` and `src` imports; lockfile regenerated. Matches the same migration in `@tintinweb/pi-subagents`. (#21)
+
 ## [0.5.0] - 2026-04-28
 
 ### Changed
@@ -152,6 +157,9 @@ Initial release — Claude Code-style task tracking and coordination for pi.
 - **Background process tracker** — output buffering (stdout + stderr), waiter notification, graceful stop with timeout escalation (SIGTERM → 5s → SIGKILL).
 - **78 unit tests** — task store CRUD, dependencies, warnings, file persistence; widget rendering, icons, spinners, token/duration formatting; process tracker lifecycle.
 
+[0.6.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.6.0
+[0.5.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.5.0
+[0.4.3]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.4.3
 [0.4.2]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.4.2
 [0.4.1]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.4.1
 [0.4.0]: https://github.com/tintinweb/pi-tasks/releases/tag/v0.4.0
