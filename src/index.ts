@@ -21,12 +21,12 @@ import { Type } from "typebox";
 import { AutoClearManager } from "./auto-clear.js";
 import { ProcessTracker } from "./process-tracker.js";
 import {
-	type CadenceConfig,
-	createCadenceState,
-	drainReminderForContext,
-	evaluateToolResult,
-	onTurnStart,
-	resetCadenceState,
+  type CadenceConfig,
+  createCadenceState,
+  drainReminderForContext,
+  evaluateToolResult,
+  onTurnStart,
+  resetCadenceState,
 } from "./reminder-cadence.js";
 import { TaskStore } from "./task-store.js";
 import { loadTasksConfig } from "./tasks-config.js";
