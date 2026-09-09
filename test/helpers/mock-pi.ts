@@ -56,6 +56,20 @@ export function mockPi() {
     async executeTool(name: string, params: any, ctx?: any) {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} not registered`);
+      // Older fixtures completed a freshly-created task in one call. Keep those
+      // fixture calls readable while exercising the public lifecycle in production:
+      // complete requires an active task and verification evidence.
+      if (name === "TaskUpdate" && params.status === "completed" && params.verification === undefined) {
+        const startTool = tools.get("TaskStart");
+        if (startTool) await startTool.execute("call-1", { taskId: params.taskId }, undefined, undefined, ctx ?? mockCtx());
+        params = { ...params, verification: ["Legacy test fixture completion"] };
+      }
+      return tool.execute("call-1", params, undefined, undefined, ctx ?? mockCtx());
+    },
+    /** Execute a registered tool without legacy fixture compatibility shims. */
+    async executeToolRaw(name: string, params: any, ctx?: any) {
+      const tool = tools.get(name);
+      if (!tool) throw new Error(`Tool ${name} not registered`);
       return tool.execute("call-1", params, undefined, undefined, ctx ?? mockCtx());
     },
     /** Execute a registered tool with an abort signal. */

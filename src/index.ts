@@ -50,7 +50,7 @@ function textResult(msg: string) {
 }
 
 /** Task tool names — used to detect task tool usage for reminder suppression. */
-const TASK_TOOL_NAMES = new Set(["TaskCreate", "TaskList", "TaskGet", "TaskUpdate", "TaskOutput", "TaskStop", "TaskExecute"]);
+const TASK_TOOL_NAMES = new Set(["TaskCreate", "TaskStart", "TaskList", "TaskGet", "TaskUpdate", "TaskOutput", "TaskStop", "TaskExecute"]);
 
 /** How many turns without task tool usage before injecting a reminder. */
 const REMINDER_INTERVAL = 4;
@@ -304,7 +304,11 @@ export default function (pi: ExtensionAPI) {
     const task = store.get(taskId);
     if (!task) return;
 
-    store.update(task.id, { status: "completed", metadata: { ...task.metadata, result } });
+    store.update(task.id, {
+      status: "completed",
+      verification: ["Subagent completed successfully"],
+      metadata: { ...task.metadata, result },
+    });
     widget.setActiveTask(task.id, false);
 
     // Auto-cascade: find unblocked dependents with agentType
@@ -349,7 +353,11 @@ export default function (pi: ExtensionAPI) {
 
     if (status === "stopped") {
       // Intentional stop — mark completed, preserve partial result
-      store.update(task.id, { status: "completed", metadata: { ...task.metadata, result: result || task.metadata?.result } });
+      store.update(task.id, {
+         status: "completed",
+         verification: ["Subagent stopped intentionally"],
+         metadata: { ...task.metadata, result: result || task.metadata?.result },
+       });
       autoClear.trackCompletion(task.id, cadence.currentTurn);
     } else {
       // Actual error — revert to pending. `result: null` drops it (the store deletes
@@ -472,6 +480,25 @@ export default function (pi: ExtensionAPI) {
   // cleared here; this only marks the boundary for the next TaskCreate.
   pi.on("agent_settled", async () => {
     autoClear.onRunEnded();
+    const unresolved = store.list().filter(task => task.status !== "completed");
+    if (unresolved.length > 0) {
+      cadence.reminderDue = true;
+      pendingWarning = `${unresolved.length} task(s) remain unresolved. Start pending tasks with TaskStart and complete active tasks with verification evidence.`;
+    }
+  });
+
+  // Do not let ordinary work start while a task is still pending. This is the
+  // tool-side enforcement that makes TaskStart mandatory without adding prompt text.
+  pi.on("tool_call", async (event) => {
+    if (TASK_TOOL_NAMES.has(event.toolName)) return;
+    const tasks = store.list();
+    if (tasks.some(task => task.status === "pending") && !tasks.some(task => task.status === "in_progress")) {
+      return {
+        block: true,
+        reason: "A task is pending. Call TaskStart for the task you are beginning before using work tools.",
+      };
+    }
+    return;
   });
 
   // ── Token usage tracking + stale-task detection ──
@@ -693,7 +720,30 @@ All tasks are created with status \`pending\`.
   });
 
   // ──────────────────────────────────────────────────
-  // Tool 2: TaskList
+  // Tool 2: TaskStart
+  // ──────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "TaskStart",
+    label: "TaskStart",
+    description: "Start one pending task before using work tools. The task must not have unresolved blockers.",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "The ID of the task to start" }),
+      owner: Type.Optional(Type.String({ description: "Owner label for the task" })),
+    }),
+
+    execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const result = store.start(params.taskId, params.owner);
+      if (result.error) return Promise.resolve(textResult(result.error));
+      widget.setActiveTask(params.taskId);
+      autoClear.resetBatchCountdown();
+      widget.update();
+      return Promise.resolve(textResult(`Task #${params.taskId} started: ${result.task?.subject ?? ""}`));
+    },
+  });
+
+  // ──────────────────────────────────────────────────
+  // Tool 3: TaskList
   // ──────────────────────────────────────────────────
 
   pi.registerTool({
@@ -841,7 +891,7 @@ Returns full task details:
 ## When to Use This Tool
 
 **Before starting work on a task:**
-- Mark it in_progress BEFORE beginning — do not start work without updating status first
+- Call TaskStart before using work tools; TaskUpdate with status \`in_progress\` is retained for compatibility
 - After resolving, call TaskList to find your next task
 
 **Mark tasks as resolved:**
@@ -874,6 +924,7 @@ Returns full task details:
 - **description**: Change the task description
 - **activeForm**: Present continuous form shown in spinner when in_progress (e.g., "Running tests")
 - **owner**: Change the task owner (agent name)
+- **verification**: Non-empty evidence required when marking the task completed
 - **metadata**: Merge metadata keys into the task (set a key to null to delete it)
 - **addBlocks**: Mark tasks that cannot start until this one completes
 - **addBlockedBy**: Mark tasks that must complete before this one can start
@@ -925,6 +976,7 @@ Set up task dependencies:
       description: Type.Optional(Type.String({ description: "New description for the task" })),
       activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress" })),
       owner: Type.Optional(Type.String({ description: "New owner for the task" })),
+      verification: Type.Optional(Type.Array(Type.String(), { description: "Evidence required when marking the task completed" })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Metadata keys to merge into the task. Set a key to null to delete it." })),
       addBlocks: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that this task blocks" })),
       addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: "Task IDs that block this task" })),
@@ -932,8 +984,45 @@ Set up task dependencies:
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { taskId, ...fields } = params;
-      const { task, changedFields, warnings } = store.update(taskId, fields);
+      const current = store.get(taskId);
+      if (fields.status === "completed") {
+        if (!current) return Promise.resolve(textResult(`Task #${taskId} update rejected: Task #${taskId} not found`));
+        if (current.status !== "in_progress") {
+          return Promise.resolve(textResult(`Task #${taskId} update rejected: Task #${taskId} can only complete from in_progress`));
+        }
+        if (!fields.verification || fields.verification.length === 0 || fields.verification.some(item => item.trim().length === 0)) {
+          return Promise.resolve(textResult(`Task #${taskId} update rejected: Task #${taskId} requires non-empty verification evidence`));
+        }
+      }
 
+      let task: Task | undefined;
+      let changedFields: string[];
+      let warnings: string[];
+      let error: string | undefined;
+      if (fields.status === "in_progress") {
+        const started = store.start(taskId, fields.owner);
+        if (started.error) {
+          return Promise.resolve(textResult(`Task #${taskId} update rejected: ${started.error}`));
+        }
+        const { status: _status, owner: _owner, ...additionalFields } = fields;
+        const updated = Object.keys(additionalFields).length > 0
+          ? store.update(taskId, additionalFields)
+          : { task: started.task, changedFields: [], warnings: [] };
+        task = updated.task;
+        changedFields = ["status", ...updated.changedFields];
+        warnings = updated.warnings;
+        error = updated.error;
+      } else {
+        const updated = store.update(taskId, fields);
+        task = updated.task;
+        changedFields = updated.changedFields;
+        warnings = updated.warnings;
+        error = updated.error;
+      }
+
+      if (error) {
+        return Promise.resolve(textResult(`Task #${taskId} update rejected: ${error}`));
+      }
       if (changedFields.length === 0 && !task) {
         return Promise.resolve(textResult(`Task #${taskId} not found`));
       }
@@ -1085,7 +1174,7 @@ Set up task dependencies:
         }
         const task = store.get(resolvedId);
         if (task?.metadata?.agentId && task.status === "in_progress") {
-          store.update(resolvedId, { status: "completed" });
+          store.update(resolvedId, { status: "completed", verification: ["Task stopped by user"] });
           autoClear.trackCompletion(resolvedId, cadence.currentTurn);
           await stopSubagent(task.metadata.agentId);
           widget.setActiveTask(resolvedId, false);
@@ -1095,7 +1184,7 @@ Set up task dependencies:
         throw new Error(`No running background process for task ${taskId}`);
       }
 
-      store.update(taskId, { status: "completed" });
+      store.update(taskId, { status: "completed", verification: ["Task stopped by user"] });
       autoClear.trackCompletion(taskId, cadence.currentTurn);
       widget.setActiveTask(taskId, false);
       widget.update();
@@ -1171,8 +1260,12 @@ Set up task dependencies:
           continue;
         }
 
-        // Mark in_progress and spawn agent via RPC
-        store.update(taskId, { status: "in_progress" });
+        // Atomically claim task before spawning agent via RPC.
+        const startResult = store.start(taskId);
+        if (startResult.error) {
+          results.push(`#${taskId}: ${startResult.error}`);
+          continue;
+        }
         const prompt = buildTaskPrompt(task, params.additional_context);
         try {
           const agentId = await spawnSubagent(task.metadata.agentType, prompt, {
@@ -1312,12 +1405,16 @@ Set up task dependencies:
         const action = await ui.select(title, actions);
 
         if (action === "▸ Start (in_progress)") {
-          store.update(taskId, { status: "in_progress" });
+          const startResult = store.start(taskId);
+          if (startResult.error) {
+            await ui.notify(startResult.error, "warning");
+            return viewTasks();
+          }
           widget.setActiveTask(taskId);
           widget.update();
           return viewTasks();
         } else if (action === "✓ Complete") {
-          store.update(taskId, { status: "completed" });
+          store.update(taskId, { status: "completed", verification: ["Completed via task menu"] });
           autoClear.trackCompletion(taskId, cadence.currentTurn);
           widget.setActiveTask(taskId, false);
           widget.update();

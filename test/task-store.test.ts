@@ -29,6 +29,31 @@ describe("TaskStore (in-memory)", () => {
     expect(t.metadata).toEqual({ key: "value" });
   });
 
+  it("starts only pending tasks without unresolved blockers", () => {
+    store.create("Blocker", "Desc");
+    store.create("Blocked", "Desc");
+    store.update("2", { addBlockedBy: ["1"] });
+
+    expect(store.start("2").error).toBe("Task #2 is blocked by #1");
+    expect(store.get("2")!.status).toBe("pending");
+
+    store.update("1", { status: "completed" });
+    const result = store.start("2", "agent-1");
+    expect(result.error).toBeUndefined();
+    expect(result.task?.status).toBe("in_progress");
+    expect(result.task?.owner).toBe("agent-1");
+
+    expect(store.start("2").error).toBe("Task #2 cannot start from status in_progress");
+  });
+
+  it("stores trimmed verification evidence on completion", () => {
+    store.create("Test", "Desc");
+    store.start("1");
+    store.update("1", { status: "completed", verification: ["  tests passed  "] });
+
+    expect(store.get("1")?.verification).toEqual(["tests passed"]);
+  });
+
   it("gets a task by ID", () => {
     store.create("Test", "Desc");
     const task = store.get("1");

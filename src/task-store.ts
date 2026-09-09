@@ -208,8 +208,27 @@ export class TaskStore {
     return sortTasks(Array.from(this.tasks.values()), sortOrder);
   }
 
+  start(id: string, owner?: string): { task: Task | undefined; error?: string } {
+    return this.withLock(() => {
+      const task = this.tasks.get(id);
+      if (!task) return { task: undefined, error: `Task #${id} not found` };
+      if (task.status !== "pending") {
+        return { task, error: `Task #${id} cannot start from status ${task.status}` };
+      }
+      const blockers = task.blockedBy.filter(blockedId => this.tasks.get(blockedId)?.status !== "completed");
+      if (blockers.length > 0) {
+        return { task, error: `Task #${id} is blocked by ${blockers.map(blockedId => `#${blockedId}`).join(", ")}` };
+      }
+      task.status = "in_progress";
+      if (owner !== undefined) task.owner = owner;
+      task.updatedAt = Date.now();
+      return { task };
+    });
+  }
+
   update(id: string, fields: {
     status?: TaskStatus | "deleted";
+    verification?: string[];
     subject?: string;
     description?: string;
     activeForm?: string;
@@ -217,10 +236,10 @@ export class TaskStore {
     metadata?: Record<string, any>;
     addBlocks?: string[];
     addBlockedBy?: string[];
-  }): { task: Task | undefined; changedFields: string[]; warnings: string[] } {
+  }): { task: Task | undefined; changedFields: string[]; warnings: string[]; error?: string } {
     return this.withLock(() => {
       const task = this.tasks.get(id);
-      if (!task) return { task: undefined, changedFields: [], warnings: [] };
+      if (!task) return { task: undefined, changedFields: [], warnings: [], error: `Task #${id} not found` };
 
       const changedFields: string[] = [];
       const warnings: string[] = [];
@@ -237,8 +256,16 @@ export class TaskStore {
       }
 
       if (fields.status !== undefined) {
+        // Keep update() as the low-level persistence primitive. Public tools use
+        // start() for atomic claiming and validate completion evidence before
+        // calling update(); internal recovery paths still need to revert a task
+        // after a failed spawn. Existing callers also use update() to seed stores.
         task.status = fields.status;
         changedFields.push("status");
+      }
+      if (fields.verification !== undefined) {
+        task.verification = fields.verification.map(item => item.trim());
+        changedFields.push("verification");
       }
       if (fields.subject !== undefined) {
         task.subject = fields.subject;

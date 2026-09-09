@@ -16,6 +16,8 @@ export interface Task {
   blockedBy: string[];
   createdAt: number;
   updatedAt: number;
+  /** Evidence required when transitioning task to completed. */
+  verification?: string[];
 }
 
 /** Serialized store format on disk. */

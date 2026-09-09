@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Task lifecycle is enforced at tool boundaries.** `TaskStart` atomically claims a pending task only when its blockers are complete, ordinary work tools are blocked until a task is active, and `TaskUpdate` requires non-empty verification evidence when completing a task. The vendored package is wired to the local `pi-tasks` fork by both platform installers.
+
 ## [0.9.0] - 2026-08-24
 
 ### Added
