@@ -37,6 +37,37 @@ describe("task lifecycle enforcement", () => {
     expect(result.content[0].text).toContain("Task #2 is blocked by #1");
   });
 
+  it("releases uncompleted local tasks when the session shuts down", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Local work", description: "Desc" });
+    await mock.executeToolRaw("TaskStart", { taskId: "1" });
+    expect((await mock.executeTool("TaskGet", { taskId: "1" })).content[0].text).toContain("Status: in_progress");
+
+    await mock.fireLifecycle("session_shutdown", {});
+
+    const task = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(task.content[0].text).toContain("Status: pending");
+  });
+
+  it("does not release agent-backed tasks before their completion event", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", {
+      subject: "Agent work",
+      description: "Desc",
+      metadata: { agentId: "agent-1" },
+    });
+    await mock.executeToolRaw("TaskStart", { taskId: "1" });
+
+    await mock.fireLifecycle("session_shutdown", {});
+
+    const task = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(task.content[0].text).toContain("Status: in_progress");
+  });
+
   it("requires active status and verification evidence before completion", async () => {
     const mock = mockPi();
     initExtension(mock.pi as any);

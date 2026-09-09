@@ -455,6 +455,30 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  /**
+   * A session can end without the model issuing a final TaskUpdate. Do not infer
+   * completion here: completion requires explicit verification evidence. Instead,
+   * release ordinary tasks from `in_progress` so a persisted session cannot claim
+   * work is still running after its host has gone away. Agent-backed tasks stay
+   * active because their completion event may arrive after a reload and
+   * `reattachAgents()` is responsible for reconciling those tasks.
+   */
+  pi.on("session_shutdown", async () => {
+    let reconciled = false;
+    for (const task of store.list()) {
+      if (task.status !== "in_progress" || task.metadata?.agentId) continue;
+      const updated = store.update(task.id, { status: "pending" });
+      if (!updated.error) {
+        widget.setActiveTask(task.id, false);
+        reconciled = true;
+      }
+    }
+    if (reconciled) {
+      autoClear.resetBatchCountdown();
+      widget.update();
+    }
+  });
+
   // ── Turn tracking for system-reminder injection ──
   // Cadence decisions live in `reminder-cadence.ts` so they're
   // unit-testable without spinning up a fake ExtensionAPI.
