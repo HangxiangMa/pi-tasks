@@ -25,6 +25,43 @@ describe("task lifecycle enforcement", () => {
     expect(await mock.fireLifecycle("tool_call", { toolName: "bash" })).toEqual([undefined]);
   });
 
+  it("blocks more work after a stale reminder until the agent checks task state", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Do work", description: "Desc" });
+    await mock.executeToolRaw("TaskStart", { taskId: "1" });
+
+    await mock.fireLifecycle("turn_start", {}, {});
+    await mock.fireLifecycle("tool_result", { toolName: "read" });
+    expect(await mock.fireLifecycle("context", { messages: [] })).toEqual([{}]);
+
+    await mock.fireLifecycle("turn_start", {}, {});
+    await mock.fireLifecycle("tool_result", { toolName: "bash" });
+    const reminderResult = await mock.fireLifecycle("context", { messages: [] });
+    const reminder = reminderResult[0];
+    expect(reminder.messages.at(-1).content[0].text).toContain("call TaskUpdate");
+
+    expect(await mock.fireLifecycle("tool_call", { toolName: "bash" })).toEqual([{
+      block: true,
+      reason: "A task status checkpoint is required before more work. Call TaskUpdate now; if the task is complete, mark it completed with non-empty verification evidence.",
+    }]);
+
+    // Reading tasks alone is not progress and cannot bypass the checkpoint.
+    await mock.executeTool("TaskList", {});
+    await mock.fireLifecycle("tool_result", { toolName: "TaskList" });
+    expect(await mock.fireLifecycle("tool_call", { toolName: "bash" })).toEqual([{
+      block: true,
+      reason: "A task status checkpoint is required before more work. Call TaskUpdate now; if the task is complete, mark it completed with non-empty verification evidence.",
+    }]);
+
+    // TaskUpdate satisfies checkpoint without auto-completing the task.
+    await mock.executeTool("TaskUpdate", { taskId: "1", metadata: { checkpoint: "reviewed" } });
+    await mock.fireLifecycle("tool_result", { toolName: "TaskUpdate" });
+    expect((await mock.executeTool("TaskGet", { taskId: "1" })).content[0].text).toContain("Status: in_progress");
+    expect(await mock.fireLifecycle("tool_call", { toolName: "bash" })).toEqual([undefined]);
+  });
+
   it("routes compatibility in_progress updates through blocker checks", async () => {
     const mock = mockPi();
     initExtension(mock.pi as any);
