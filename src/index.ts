@@ -1373,9 +1373,7 @@ Set up task dependencies:
   // /tasks command
   // ──────────────────────────────────────────────────
 
-  pi.registerCommand("tasks", {
-    description: "Manage tasks — view, create, clear completed",
-    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+  const taskCommandHandler = async (_args: string, ctx: ExtensionCommandContext) => {
       latestCtx = ctx;
       widget.setUICtx(ctx.ui as UICtx);
       initializeStoreForContext(ctx);
@@ -1503,7 +1501,22 @@ Set up task dependencies:
         return mainMenu();
       };
 
-      await mainMenu();
-    },
+      const commandArgs = _args.trim().replace(/^#/, "").split(/\s+/).filter(Boolean);
+      const directId = commandArgs[0] === "get" || commandArgs[0] === "output"
+        ? commandArgs[1]
+        : commandArgs[0];
+      if (directId) await viewTaskDetail(directId.replace(/^#/, ""));
+      else await mainMenu();
+    }
+
+  pi.registerCommand("tasks", {
+    description: "Manage tasks — view, create, clear completed",
+    handler: taskCommandHandler,
   });
+  for (const name of ["task", "tasklist", "taskget", "taskoutput"]) {
+    pi.registerCommand(name, {
+      description: "View task list or task details",
+      handler: taskCommandHandler,
+    });
+  }
 }
