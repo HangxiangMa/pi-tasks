@@ -512,6 +512,21 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
+  // Blocking only helps if the model can actually call the tool the reason names.
+  // Hosts that scope tools (getActiveTools) can leave TaskStart/TaskUpdate
+  // deactivated while a task is still pending — e.g. after a tool-set change or a
+  // resumed session — with no lifecycle event to tell this extension. Without this
+  // check that leaves every other tool blocked with no way out. Older hosts (and
+  // the test mock) don't implement getActiveTools; the catch preserves the
+  // pre-existing enforced behavior for them.
+  function canEscapeVia(toolName: string): boolean {
+    try {
+      return pi.getActiveTools().includes(toolName);
+    } catch {
+      return true;
+    }
+  }
+
   // Do not let ordinary work start while a task is still pending. This is the
   // tool-side enforcement that makes TaskStart mandatory without adding prompt text.
   // Once a stale-task reminder has reached the model, require a task-tool
@@ -523,12 +538,14 @@ export default function (pi: ExtensionAPI) {
     if (TASK_TOOL_NAMES.has(event.toolName)) return;
     const tasks = store.list();
     if (taskCheckpointRequired && tasks.some(task => task.status === "in_progress")) {
+      if (!canEscapeVia("TaskUpdate")) return;
       return {
         block: true,
         reason: "A task status checkpoint is required before more work. Call TaskUpdate now; if the task is complete, mark it completed with non-empty verification evidence.",
       };
     }
     if (tasks.some(task => task.status === "pending") && !tasks.some(task => task.status === "in_progress")) {
+      if (!canEscapeVia("TaskStart")) return;
       return {
         block: true,
         reason: "A task is pending. Call TaskStart for the task you are beginning before using work tools.",

@@ -25,6 +25,15 @@ describe("task lifecycle enforcement", () => {
     expect(await mock.fireLifecycle("tool_call", { toolName: "bash" })).toEqual([undefined]);
   });
 
+  it("fails open when TaskStart is not among the host's active tools", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Do work", description: "Desc" });
+    (mock.pi as any).getActiveTools = () => ["bash"];
+    expect(await mock.fireLifecycle("tool_call", { toolName: "bash" })).toEqual([undefined]);
+  });
+
   it("blocks more work after a stale reminder until the agent checks task state", async () => {
     const mock = mockPi();
     initExtension(mock.pi as any);
