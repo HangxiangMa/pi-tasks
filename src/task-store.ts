@@ -183,13 +183,14 @@ export class TaskStore {
     }
   }
 
-  create(subject: string, description: string, activeForm?: string, metadata?: Record<string, any>): Task {
+  create(subject: string, description: string, activeForm?: string, metadata?: Record<string, any>, todoId?: string): Task {
     return this.withLock(() => {
       const now = Date.now();
       const task: Task = {
         id: String(this.nextId++),
         subject,
         description,
+        ...(todoId ? { todoId } : {}),
         status: "pending",
         activeForm,
         owner: undefined,

@@ -8,6 +8,8 @@ export interface Task {
   id: string;
   subject: string;
   description: string;
+  /** Parent pi-todo item. TODO owns lifecycle; task only executes this child. */
+  todoId?: string;
   status: TaskStatus;
   activeForm?: string;
   owner?: string;

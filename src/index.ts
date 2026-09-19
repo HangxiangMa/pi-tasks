@@ -173,6 +173,23 @@ export default function (pi: ExtensionAPI) {
   let cascadeConfig: { additionalContext?: string; model?: string; maxTurns?: number } | undefined;
   /** Maps agent IDs to task IDs for O(1) completion lookup. */
   const agentTaskMap = new Map<string, string>();
+  /** Latest parent TODO state; TODO owns this lifecycle and tasks only execute children. */
+  const parentTodos = new Map<string, { status: string }>();
+  pi.events.on("todo:updated", (event: unknown) => {
+    const todos = (event as { todos?: Array<{ id?: string; status: string }> })?.todos;
+    if (!Array.isArray(todos)) return;
+    parentTodos.clear();
+    for (const todo of todos) if (todo.id) parentTodos.set(todo.id, { status: todo.status });
+  });
+
+  function parentLifecycleError(task: Task): string | undefined {
+    if (!task.todoId) return undefined;
+    const parent = parentTodos.get(task.todoId);
+    if (!parent) return undefined; // Older hosts may load TODO after tasks.
+    if (parent.status === "completed") return `Parent TODO ${task.todoId} is completed; task cannot start.`;
+    if (parent.status === "blocked") return `Parent TODO ${task.todoId} is blocked; task cannot start.`;
+    return undefined;
+  }
 
   // ── Subagent RPC helpers ──
 
@@ -757,6 +774,7 @@ All tasks are created with status \`pending\`.
       activeForm: Type.Optional(Type.String({ description: "Present continuous form shown in spinner when in_progress (e.g., 'Running tests')" })),
       agentType: Type.Optional(Type.String({ description: "Agent type for subagent execution (e.g., 'general-purpose', 'Explore'). Tasks with agentType can be started via TaskExecute." })),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Arbitrary metadata to attach to the task" })),
+      todoId: Type.Optional(Type.String({ minLength: 1, description: "Parent TODO item ID; TODO owns lifecycle state" })),
     }),
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -766,7 +784,7 @@ All tasks are created with status \`pending\`.
       autoClear.startNewBatch();
       const meta = params.metadata ?? {};
       if (params.agentType) meta.agentType = params.agentType;
-      const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined);
+      const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined, params.todoId);
       widget.update();
       return Promise.resolve(textResult(`Task #${task.id} created successfully: ${task.subject}`));
     },
@@ -786,6 +804,9 @@ All tasks are created with status \`pending\`.
     }),
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const current = store.get(params.taskId);
+      const lifecycleError = current && parentLifecycleError(current);
+      if (lifecycleError) return Promise.resolve(textResult(lifecycleError));
       const result = store.start(params.taskId, params.owner);
       if (result.error) return Promise.resolve(textResult(result.error));
       widget.setActiveTask(params.taskId);
@@ -842,6 +863,7 @@ Use TaskGet with a specific task ID to view full details including description a
         if (task.owner) {
           line += ` (${task.owner})`;
         }
+        if (task.todoId) line += ` [todo ${task.todoId}]`;
 
         // Only show non-completed blockers
         if (task.blockedBy.length > 0) {
@@ -908,6 +930,7 @@ Returns full task details:
         lines.push(`Owner: ${task.owner}`);
       }
       lines.push(`Description: ${desc}`);
+      if (task.todoId) lines.push(`Parent TODO: ${task.todoId} (TODO owns lifecycle state)`);
       if (task.verification?.length) {
         lines.push(`Verification: ${JSON.stringify(task.verification)}`);
       }
@@ -1056,6 +1079,10 @@ Set up task dependencies:
       let warnings: string[];
       let error: string | undefined;
       if (fields.status === "in_progress") {
+        if (current) {
+          const lifecycleError = parentLifecycleError(current);
+          if (lifecycleError) return Promise.resolve(textResult(`Task #${taskId} update rejected: ${lifecycleError}`));
+        }
         const started = store.start(taskId, fields.owner);
         if (started.error) {
           return Promise.resolve(textResult(`Task #${taskId} update rejected: ${started.error}`));
@@ -1306,6 +1333,11 @@ Set up task dependencies:
         const task = store.get(taskId);
         if (!task) {
           results.push(`#${taskId}: not found`);
+          continue;
+        }
+        const lifecycleError = parentLifecycleError(task);
+        if (lifecycleError) {
+          results.push(`#${taskId}: ${lifecycleError}`);
           continue;
         }
         if (task.status !== "pending") {
