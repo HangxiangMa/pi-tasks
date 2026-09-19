@@ -1492,14 +1492,9 @@ Set up task dependencies:
       else await mainMenu();
     }
 
+  // Keep one canonical command. Background shell tasks use /bg-tasks.
   pi.registerCommand("tasks", {
     description: "Manage tasks — view, create, clear completed",
     handler: taskCommandHandler,
   });
-  for (const name of ["task", "tasklist", "taskget", "taskoutput"]) {
-    pi.registerCommand(name, {
-      description: "View task list or task details",
-      handler: taskCommandHandler,
-    });
-  }
 }
