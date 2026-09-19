@@ -483,7 +483,6 @@ export default function (pi: ExtensionAPI) {
   // Cadence decisions live in `reminder-cadence.ts` so they're
   // unit-testable without spinning up a fake ExtensionAPI.
   const cadence = createCadenceState();
-  let taskCheckpointRequired = false;
   const cadenceConfig: CadenceConfig = {
     reminderInterval: REMINDER_INTERVAL,
     taskToolNames: TASK_TOOL_NAMES,
@@ -529,21 +528,11 @@ export default function (pi: ExtensionAPI) {
 
   // Do not let ordinary work start while a task is still pending. This is the
   // tool-side enforcement that makes TaskStart mandatory without adding prompt text.
-  // Once a stale-task reminder has reached the model, require a task-tool
-  // checkpoint before allowing more work. This prevents one in_progress task from
-  // permanently satisfying the pending-task guard while the model silently works
-  // through the rest of the list. Only TaskUpdate clears the checkpoint;
-  // completion itself remains explicit and verification-gated.
+  // Stale-task reminders are advisory. A hard checkpoint gate turns the reminder
+  // into a blocking loop; TaskUpdate remains available for explicit reconciliation.
   pi.on("tool_call", async (event) => {
     if (TASK_TOOL_NAMES.has(event.toolName)) return;
     const tasks = store.list();
-    if (taskCheckpointRequired && tasks.some(task => task.status === "in_progress")) {
-      if (!canEscapeVia("TaskUpdate")) return;
-      return {
-        block: true,
-        reason: "A task status checkpoint is required before more work. Call TaskUpdate now; if the task is complete, mark it completed with non-empty verification evidence.",
-      };
-    }
     if (tasks.some(task => task.status === "pending") && !tasks.some(task => task.status === "in_progress")) {
       if (!canEscapeVia("TaskStart")) return;
       return {
@@ -618,7 +607,6 @@ export default function (pi: ExtensionAPI) {
   // returns a transformed messages array used only for this one request.
   pi.on("context", async (event) => {
     if (!drainReminderForContext(cadence)) return {};
-    taskCheckpointRequired = true;
     const tasks = store.list();
 
     return {
@@ -655,7 +643,6 @@ export default function (pi: ExtensionAPI) {
       // close a task it never ran. reattachAgents() rebuilds what this session owns.
       agentTaskMap.clear();
       resetCadenceState(cadence);
-      taskCheckpointRequired = false;
       autoClear.reset();
       // Memory mode has no file to switch — clear tasks explicitly on /new.
       if (reason === "new" && taskScope === "memory") {
@@ -1083,10 +1070,6 @@ Set up task dependencies:
       if (changedFields.length === 0 && !task) {
         return Promise.resolve(textResult(`Task #${taskId} not found`));
       }
-
-      // A successful TaskUpdate is the explicit checkpoint required after a stale
-      // reminder. Rejected updates leave the gate in place.
-      taskCheckpointRequired = false;
 
       // Update widget active task tracking
       if (fields.status === "in_progress") {
