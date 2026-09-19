@@ -54,6 +54,7 @@ export interface TaskMetrics {
   startedAt: number;
   inputTokens: number;
   outputTokens: number;
+  cost: number;
 }
 
 /** Format milliseconds as a human-readable duration (e.g., "2m 49s", "1h 3m"). */
@@ -107,7 +108,7 @@ export class TaskWidget {
     if (taskId && active) {
       this.activeTaskIds.add(taskId);
       if (!this.metrics.has(taskId)) {
-        this.metrics.set(taskId, { startedAt: Date.now(), inputTokens: 0, outputTokens: 0 });
+        this.metrics.set(taskId, { startedAt: Date.now(), inputTokens: 0, outputTokens: 0, cost: 0 });
       }
       this.ensureTimer();
     } else if (taskId) {
@@ -117,15 +118,18 @@ export class TaskWidget {
   }
 
   /** Record token usage for the currently active task(s). */
-  addTokenUsage(inputTokens: number, outputTokens: number) {
-    // Distribute to all currently active tasks
+  addTokenUsage(inputTokens: number, outputTokens: number, cost = 0) {
+    // Distribute usage to all currently active tasks. The host turn can contain
+    // several task tool calls, so this is the only reliable attribution point.
     for (const id of this.activeTaskIds) {
       const m = this.metrics.get(id);
       if (m) {
         m.inputTokens += inputTokens;
         m.outputTokens += outputTokens;
+        m.cost += cost;
       }
     }
+    this.update();
   }
 
   /** Ensure the widget update timer is running. The spinner advances here and
@@ -178,13 +182,19 @@ export class TaskWidget {
 
     // Collapsing only decides what goes in the list; the visible-limit logic below
     // then runs unchanged over whatever remains.
-    const collapseCompleted = this.config.collapseCompleted ?? false;
-    const listed = collapseCompleted ? tasks.filter(t => t.status !== "completed") : tasks;
     const showAll = this.config.showAll ?? false;
     const limit = this.config.maxVisible ?? DEFAULT_MAX_VISIBLE_TASKS;
+    // When a completed plan would consume the widget, fold it automatically so active
+    // work remains visible. An explicit setting still wins for users who want history.
     // Narrowed rather than defaulted: config is hand-editable JSON, and an
     // unrecognised value would index TRUNCATE_FNS to undefined and blank the widget.
     const hiddenAt = this.config.hiddenAt === "top" ? "top" : "bottom";
+    const collapseCompleted = this.config.collapseCompleted ?? (
+      !showAll && hiddenAt !== "top" && completed.length > 1 &&
+      completed.length + inProgress.length + pending.length >= limit &&
+      inProgress.length + pending.length > 0
+    );
+    const listed = collapseCompleted ? tasks.filter(t => t.status !== "completed") : tasks;
     const visible = showAll ? listed : TRUNCATE_FNS[hiddenAt](listed, limit);
 
     const hiddenCount = listed.length - visible.length;
@@ -233,6 +243,7 @@ export class TaskWidget {
           const tokenParts: string[] = [];
           if (m.inputTokens > 0) tokenParts.push(`${glyphs.inputTokens} ${formatTokens(m.inputTokens)}`);
           if (m.outputTokens > 0) tokenParts.push(`${glyphs.outputTokens} ${formatTokens(m.outputTokens)}`);
+          if (m.cost > 0) tokenParts.push(`$${m.cost.toFixed(4)}`);
           stats = tokenParts.length > 0
             ? ` ${theme.fg("dim", `(${elapsed} ${glyphs.statsSeparator} ${tokenParts.join(" ")})`)}`
             : ` ${theme.fg("dim", `(${elapsed})`)}`;

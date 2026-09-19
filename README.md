@@ -12,7 +12,8 @@ https://github.com/user-attachments/assets/1d0ee87a-e0a5-4bfa-a9b9-2f9144cb905b
 
 ## Features
 
-- **7 LLM-callable tools** — `TaskCreate`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop`, `TaskExecute` — matching Claude Code's exact tool specs and descriptions
+- **8 LLM-callable tools** — `TaskCreate`, `TaskStart`, `TaskList`, `TaskGet`, `TaskUpdate`, `TaskOutput`, `TaskStop`, `TaskExecute` — with `TaskStart` as the atomic pending-to-in-progress path
+- **Lifecycle enforcement** — startable tasks must be claimed with `TaskStart` before ordinary work tools run; completion requires non-empty verification evidence, shown by `TaskGet`, and reopening clears stale evidence
 - **Persistent widget** — live task list above the editor with `✔`/`◼`/`◻` status marks, task numbers (`#1`, `#2`, …), strikethrough for completed tasks, star spinner (`✳✽`) for active tasks with elapsed time and token counts. Every glyph is [configurable](CUSTOMIZING.md#task-glyphs)
 - **System-reminder injection** — periodic `<system-reminder>` nudges injected into the upcoming LLM request (via the `context` hook, transient and never persisted) when task tools haven't been used recently, or when a task is left stuck `in_progress` after a text-only turn. Shaped after Claude Code's todo reminders — an empty-list nudge or a JSON echo of the current list (capped at 10 tasks)
 - **Prompt guidelines** — workflow contract encoded in tool descriptions, nudging the LLM at the point of tool use
@@ -206,6 +207,10 @@ pending → in_progress → completed
 
 Tasks are created as `pending`. Mark `in_progress` before starting work, `completed` when done. `deleted` removes entirely — IDs never reset.
 
+### Todo versus task
+
+Use the host todo list for the plan: milestones, dependencies, and overall progress. Use this task list for concrete executable work: each task has an owner, lifecycle state, blockers, execution output, and verification evidence. Do not duplicate a plan item as a task unless it represents work that can be started, stopped, or delegated independently.
+
 ## Dependency Management
 
 - **Bidirectional edges:** `addBlocks`/`addBlockedBy` maintain both sides automatically
@@ -385,7 +390,7 @@ If [`pi-subagents`](https://github.com/tintinweb/pi-subagents) is not installed,
 
 ```
 src/
-├── index.ts            # Extension entry: 7 tools + /tasks command + widget + subagent integration
+├── index.ts            # Extension entry: 8 tools + /tasks command + widget + subagent integration
 ├── types.ts            # Task, TaskStatus, BackgroundProcess types
 ├── task-store.ts       # File-backed store with CRUD, dependencies, locking
 ├── auto-clear.ts       # Turn-based auto-clearing of completed tasks (AutoClearManager)

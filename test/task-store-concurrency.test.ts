@@ -100,24 +100,21 @@ describe("TaskStore — shared file access", () => {
     expect(new TaskStore(file).list().map(t => t.subject)).toEqual(["After crash"]);
   });
 
-  it("reclaims a lock file that never got a PID written to it", () => {
-    // acquireLock creates the lock file and then writes its PID. A crash in between
-    // leaves an empty lock naming nobody — which used to be unrecoverable: every
-    // later mutation burned the full retry budget and threw, permanently, until
-    // someone deleted the file by hand.
+  it("does not reclaim a lock file that never got a PID written to it", () => {
+    // An incomplete owner record is not proof that the owner is dead. Keep it
+    // until the bounded lock timeout rather than risking concurrent writes.
     writeFileSync(`${file}.lock`, "");
 
     const store = new TaskStore(file);
-    expect(() => store.create("After crash", "d")).not.toThrow();
-    expect(new TaskStore(file).list().map(t => t.subject)).toEqual(["After crash"]);
-  });
+    expect(() => store.create("After crash", "d")).toThrow(/lock-timeout/);
+  }, 7_000);
 
-  it("reclaims a lock file holding garbage", () => {
+  it("does not reclaim a lock file holding garbage", () => {
     writeFileSync(`${file}.lock`, "not-a-pid");
 
     const store = new TaskStore(file);
-    expect(() => store.create("After garbage lock", "d")).not.toThrow();
-  });
+    expect(() => store.create("After garbage lock", "d")).toThrow(/lock-timeout/);
+  }, 7_000);
 
   it("still reads the PID out of a lock written in the pid:token format", () => {
     // The lock token carries a unique suffix so a holder can recognise its own

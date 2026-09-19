@@ -33,29 +33,26 @@ function acquireLock(lockPath: string): string {
       // O_EXCL: fail if file exists
       writeFileSync(lockPath, token, { flag: "wx" });
       return token;
-    } catch (e: any) {
-      if (e.code === "EEXIST") {
-        // Check for stale lock (process no longer running)
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") {
+        // Only a lock with a readable PID that is definitely gone is stale.
+        // Malformed or unreadable locks are not safe to reclaim.
         try {
-          const pid = parseInt(readFileSync(lockPath, "utf-8"), 10);
-          // A lock naming a dead process is stale. So is one with no readable PID,
-          // but only after a couple of polls: the file is created before the PID is
-          // written to it, so a live acquirer can look unparseable for a moment —
-          // one that crashed in that window looks that way forever.
-          if (pid > 0 ? !isProcessRunning(pid) : i >= 2) {
+          const observed = readFileSync(lockPath, "utf-8");
+          const pid = Number.parseInt(observed, 10);
+          if (pid > 0 && !isProcessRunning(pid) && readFileSync(lockPath, "utf-8") === observed) {
             unlinkSync(lockPath);
             continue;
           }
-        } catch { /* ignore read errors */ }
-        // Wait and retry
-        const start = Date.now();
-        while (Date.now() - start < LOCK_RETRY_MS) { /* busy wait */ }
+        } catch { /* keep waiting; ownership is not provably dead */ }
+        sleepSync(LOCK_RETRY_MS);
         continue;
       }
-      throw e;
+      throw error;
     }
   }
-  throw new Error(`Failed to acquire lock: ${lockPath}`);
+  throw new Error(`lock-timeout: failed to acquire ${lockPath} after ${LOCK_MAX_RETRIES * LOCK_RETRY_MS}ms`);
 }
 
 /**
@@ -72,7 +69,17 @@ function releaseLock(lockPath: string, token: string): void {
 }
 
 function isProcessRunning(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+function sleepSync(milliseconds: number): void {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
 }
 
 /**
@@ -256,10 +263,6 @@ export class TaskStore {
       }
 
       if (fields.status !== undefined) {
-        // Keep update() as the low-level persistence primitive. Public tools use
-        // start() for atomic claiming and validate completion evidence before
-        // calling update(); internal recovery paths still need to revert a task
-        // after a failed spawn. Existing callers also use update() to seed stores.
         task.status = fields.status;
         changedFields.push("status");
       }

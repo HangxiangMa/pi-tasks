@@ -320,8 +320,9 @@ export default function (pi: ExtensionAPI) {
         t.blockedBy.every(depId => store.get(depId)?.status === "completed")
       );
       for (const next of unblocked) {
-        store.update(next.id, { status: "in_progress" });
-        const prompt = buildTaskPrompt(next, cascadeConfig.additionalContext);
+        const started = store.start(next.id);
+        if (started.error || !started.task) continue;
+        const prompt = buildTaskPrompt(started.task, cascadeConfig.additionalContext);
         try {
           const agentId = await spawnSubagent(next.metadata.agentType, prompt, {
             description: next.subject,
@@ -533,7 +534,11 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event) => {
     if (TASK_TOOL_NAMES.has(event.toolName)) return;
     const tasks = store.list();
-    if (tasks.some(task => task.status === "pending") && !tasks.some(task => task.status === "in_progress")) {
+    const startablePending = tasks.some(task =>
+       task.status === "pending" &&
+       task.blockedBy.every(blockerId => store.get(blockerId)?.status === "completed"),
+     );
+     if (startablePending && !tasks.some(task => task.status === "in_progress")) {
       if (!canEscapeVia("TaskStart")) return;
       return {
         block: true,
@@ -550,7 +555,11 @@ export default function (pi: ExtensionAPI) {
   pi.on("turn_end", async (event) => {
     const msg = event.message as any;
     if (msg?.role === "assistant" && msg.usage) {
-      widget.addTokenUsage(msg.usage.input ?? 0, msg.usage.output ?? 0);
+      widget.addTokenUsage(
+        msg.usage.input ?? 0,
+        msg.usage.output ?? 0,
+        msg.usage.cost?.total ?? 0,
+      );
     }
 
     // Stale-task detection: catch the case where the agent finishes work in a
@@ -899,6 +908,9 @@ Returns full task details:
         lines.push(`Owner: ${task.owner}`);
       }
       lines.push(`Description: ${desc}`);
+      if (task.verification?.length) {
+        lines.push(`Verification: ${JSON.stringify(task.verification)}`);
+      }
 
       if (task.blockedBy.length > 0) {
         const openBlockers = task.blockedBy.filter(bid => {
@@ -1207,32 +1219,43 @@ Set up task dependencies:
       if (!taskId) throw new Error("task_id is required");
 
       const stopped = await tracker.stop(taskId);
-      if (!stopped) {
-        // No shell process — check if this is a subagent task
-        // Support both task IDs and agent IDs
-        let resolvedId = taskId;
-        if (!store.get(resolvedId)) {
-          for (const [agentId, tId] of agentTaskMap) {
-            if (agentId === taskId || agentId.startsWith(taskId)) { resolvedId = tId; break; }
-          }
+      if (stopped) {
+        const task = store.get(taskId);
+        const output = tracker.getOutput(taskId)?.output.trim();
+        if (!task || task.status !== "in_progress" || !output) {
+          throw new Error(`Task #${taskId} cannot be completed without tracked in-progress execution evidence`);
         }
-        const task = store.get(resolvedId);
-        if (task?.metadata?.agentId && task.status === "in_progress") {
-          store.update(resolvedId, { status: "completed", verification: ["Task stopped by user"] });
-          autoClear.trackCompletion(resolvedId, cadence.currentTurn);
-          await stopSubagent(task.metadata.agentId);
-          widget.setActiveTask(resolvedId, false);
-          widget.update();
-          return textResult(`Task #${resolvedId} stopped successfully`);
-        }
-        throw new Error(`No running background process for task ${taskId}`);
+        store.update(taskId, { status: "completed", verification: [output] });
+        autoClear.trackCompletion(taskId, cadence.currentTurn);
+        widget.setActiveTask(taskId, false);
+        widget.update();
+        return textResult(`Task #${taskId} stopped successfully`);
       }
 
-      store.update(taskId, { status: "completed", verification: ["Task stopped by user"] });
-      autoClear.trackCompletion(taskId, cadence.currentTurn);
-      widget.setActiveTask(taskId, false);
+      // No shell process — resolve a tracked subagent ID or task ID.
+      let resolvedId = taskId;
+      let agentId: string | undefined;
+      for (const [candidate, tId] of agentTaskMap) {
+        if (tId === taskId || candidate === taskId || candidate.startsWith(taskId)) {
+          resolvedId = tId;
+          agentId = candidate;
+          break;
+        }
+      }
+      const task = store.get(resolvedId);
+      if (!task || !agentId || task.status !== "in_progress") {
+        throw new Error(`No running background process for task ${taskId}`);
+      }
+      const evidence = task.metadata?.result;
+      if (typeof evidence !== "string" || !evidence.trim()) {
+        throw new Error(`Task #${taskId} cannot be completed without tracked execution evidence`);
+      }
+      store.update(resolvedId, { status: "completed", verification: [evidence.trim()] });
+      autoClear.trackCompletion(resolvedId, cadence.currentTurn);
+      await stopSubagent(agentId);
+      widget.setActiveTask(resolvedId, false);
       widget.update();
-      return textResult(`Task #${taskId} stopped successfully`);
+      return textResult(`Task #${resolvedId} stopped successfully`);
     },
   });
 

@@ -869,6 +869,7 @@ describe("RPC protocol correctness", () => {
       agentType: "general-purpose",
     });
     await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    await mock.executeTool("TaskUpdate", { taskId: "1", metadata: { result: "partial work" } });
     expect(rpc.spawned).toHaveLength(1);
 
     const result = await mock.executeTool("TaskStop", { task_id: "1" });
@@ -890,6 +891,7 @@ describe("RPC protocol correctness", () => {
       agentType: "general-purpose",
     });
     await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    await mock.executeTool("TaskUpdate", { taskId: "1", metadata: { result: "partial work" } });
 
     // Clear spawned list so the mock's stop handler won't find the agent
     rpc.spawned.length = 0;
@@ -917,16 +919,16 @@ describe("RPC protocol correctness", () => {
     await mock.executeTool("TaskUpdate", {
       taskId: "1",
       status: "in_progress",
-      metadata: { agentType: "general-purpose", agentId: "ghost-agent" },
+      metadata: { agentType: "general-purpose", agentId: "ghost-agent", result: "partial work" },
     });
 
     vi.useFakeTimers();
     const stopPromise = mock.executeTool("TaskStop", { task_id: "1" });
+    const handledStop = stopPromise.catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(11000);
 
-    // Should resolve (not throw) — stopSubagent catches timeout
-    const result = await stopPromise;
-    expect(result.content[0].text).toContain("stopped successfully");
+    // Untracked agent IDs must not be completed by TaskStop.
+    await expect(handledStop).resolves.toMatchObject({ message: "No running background process for task 1" });
 
     vi.useRealTimers();
   });

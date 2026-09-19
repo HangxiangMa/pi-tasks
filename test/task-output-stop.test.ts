@@ -22,6 +22,7 @@ afterEach(() => { delete process.env.PI_TASKS; });
 async function launchAgentTask(mock: ReturnType<typeof mockPi>, subject = "Agent task") {
   await mock.executeTool("TaskCreate", { subject, description: "d", agentType: "general-purpose" });
   await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+  await mock.executeTool("TaskUpdate", { taskId: "1", metadata: { result: "partial work" } });
 }
 
 describe("TaskOutput", () => {
@@ -39,7 +40,7 @@ describe("TaskOutput", () => {
   it("returns the current status without waiting when block is false", async () => {
     await launchAgentTask(mock);
     const res = await mock.executeTool("TaskOutput", { task_id: "1", block: false, timeout: 30000 });
-    expect(res.content[0].text).toBe("Task #1 [in_progress] — subagent agent-1");
+    expect(res.content[0].text).toContain("Task #1 [in_progress] — subagent agent-1");
   });
 
   it("resolves a blocking wait when the agent completes", async () => {
@@ -147,7 +148,7 @@ describe("TaskOutput — agent ID lookups", () => {
     try {
       await launchAgentTask(mock);
       const res = await mock.executeTool("TaskOutput", { task_id: "agent-1", block: false, timeout: 30000 });
-      expect(res.content[0].text).toBe("Task #1 [in_progress] — subagent agent-1");
+      expect(res.content[0].text).toContain("Task #1 [in_progress] — subagent agent-1");
     } finally {
       rpc.unsub();
     }
@@ -162,7 +163,7 @@ describe("TaskOutput — agent ID lookups", () => {
     try {
       await launchAgentTask(mock);
       const res = await mock.executeTool("TaskOutput", { task_id: "agent-", block: false, timeout: 30000 });
-      expect(res.content[0].text).toBe("Task #1 [in_progress] — subagent agent-1");
+      expect(res.content[0].text).toContain("Task #1 [in_progress] — subagent agent-1");
     } finally {
       rpc.unsub();
     }

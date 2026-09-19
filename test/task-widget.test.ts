@@ -174,6 +174,26 @@ describe("TaskWidget", () => {
     expect(ui.state.widgets.get("tasks")?.content).toBeUndefined();
   });
 
+  it("folds completed tasks so active work remains visible", () => {
+    for (let i = 0; i < 9; i++) store.create(`Done ${i + 1}`, "Desc");
+    store.create("Still working", "Desc");
+    store.update("1", { status: "completed" });
+    store.update("2", { status: "completed" });
+    store.update("3", { status: "completed" });
+    store.update("4", { status: "completed" });
+    store.update("5", { status: "completed" });
+    store.update("6", { status: "completed" });
+    store.update("7", { status: "completed" });
+    store.update("8", { status: "completed" });
+    store.update("9", { status: "completed" });
+    store.update("10", { status: "in_progress" });
+    widget.update();
+
+    const lines = renderWidget(ui.state);
+    expect(lines.some(line => line.includes("Still working"))).toBe(true);
+    expect(lines.some(line => line.includes("9 completed"))).toBe(true);
+  });
+
   it("limits visible tasks to MAX_VISIBLE_TASKS", () => {
     for (let i = 0; i < 15; i++) {
       store.create(`Task ${i + 1}`, "Desc");
@@ -798,6 +818,14 @@ describe("configurable glyphs", () => {
     const activeLine = renderWidget(ui.state)[3];
     expect(activeLine).toContain("Running~~");
     expect(activeLine).toContain("(5s | in 1.5k out 800)");
+  });
+
+  it("renders task cost when the host reports usage", () => {
+    seed();
+    widget.setActiveTask("3");
+    widget.addTokenUsage(100, 20, 0.012345);
+
+    expect(renderWidget(ui.state)[3]).toContain("$0.0123");
   });
 
   // Asserted by shape, not by exact string: where pi-tui puts the cut is its
