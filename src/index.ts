@@ -173,6 +173,10 @@ export default function (pi: ExtensionAPI) {
   let cascadeConfig: { additionalContext?: string; model?: string; maxTurns?: number } | undefined;
   /** Maps agent IDs to task IDs for O(1) completion lookup. */
   const agentTaskMap = new Map<string, string>();
+  function detachAgent(task: Task | undefined): void {
+    const agentId = task?.metadata?.agentId;
+    if (typeof agentId === "string") agentTaskMap.delete(agentId);
+  }
   /** Latest parent TODO state; TODO owns this lifecycle and tasks only execute children. */
   const parentTodos = new Map<string, { status: string }>();
   pi.events.on("todo:updated", (event: unknown) => {
@@ -319,7 +323,7 @@ export default function (pi: ExtensionAPI) {
     if (!taskId) return;
     agentTaskMap.delete(id);
     const task = store.get(taskId);
-    if (!task) return;
+    if (!task || task.status !== "in_progress" || task.metadata?.agentId !== id) return;
 
     store.update(task.id, {
       status: "completed",
@@ -367,7 +371,7 @@ export default function (pi: ExtensionAPI) {
     if (!taskId) return;
     agentTaskMap.delete(id);
     const task = store.get(taskId);
-    if (!task) return;
+    if (!task || task.status !== "in_progress" || task.metadata?.agentId !== id) return;
 
     if (status === "stopped") {
       // Intentional stop — mark completed, preserve partial result
@@ -1115,8 +1119,10 @@ Set up task dependencies:
         widget.setActiveTask(taskId);
         autoClear.resetBatchCountdown();
       } else if (fields.status === "pending") {
+        detachAgent(current);
         autoClear.resetBatchCountdown();
       } else if (fields.status === "completed" || fields.status === "deleted") {
+        detachAgent(current);
         widget.setActiveTask(taskId, false);
         if (fields.status === "completed") autoClear.trackCompletion(taskId, cadence.currentTurn);
       }
@@ -1278,6 +1284,7 @@ Set up task dependencies:
         throw new Error(`Task #${taskId} cannot be completed without tracked execution evidence`);
       }
       store.update(resolvedId, { status: "completed", verification: [evidence.trim()] });
+      detachAgent(task);
       autoClear.trackCompletion(resolvedId, cadence.currentTurn);
       await stopSubagent(agentId);
       widget.setActiveTask(resolvedId, false);
@@ -1365,16 +1372,22 @@ Set up task dependencies:
           results.push(`#${taskId}: ${startResult.error}`);
           continue;
         }
-        const prompt = buildTaskPrompt(task, params.additional_context);
+        const resetAgent = store.update(taskId, { metadata: { agentId: null } });
+        const runningTask = resetAgent.task ?? startResult.task;
+        if (!runningTask) {
+          results.push(`#${taskId}: failed to read started task`);
+          continue;
+        }
+        const prompt = buildTaskPrompt(runningTask, params.additional_context);
         try {
-          const agentId = await spawnSubagent(task.metadata.agentType, prompt, {
+          const agentId = await spawnSubagent(runningTask.metadata.agentType, prompt, {
             description: task.subject,
             isBackground: true,
             maxTurns: params.max_turns,
             ...(params.model ? { model: params.model } : {}),
           });
           agentTaskMap.set(agentId, taskId);
-          store.update(taskId, { owner: agentId, metadata: { ...task.metadata, agentId } });
+          store.update(taskId, { owner: agentId, metadata: { ...runningTask.metadata, agentId } });
           widget.setActiveTask(taskId);
           launched.push(`#${taskId} → agent ${agentId}`);
         } catch (err: any) {

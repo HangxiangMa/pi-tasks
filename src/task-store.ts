@@ -228,6 +228,8 @@ export class TaskStore {
         return { task, error: `Task #${id} is blocked by ${blockers.map(blockedId => `#${blockedId}`).join(", ")}` };
       }
       task.status = "in_progress";
+      delete task.verification;
+      for (const key of ["result", "lastError"]) delete task.metadata[key];
       if (owner !== undefined) task.owner = owner;
       task.updatedAt = Date.now();
       return { task };
@@ -266,6 +268,10 @@ export class TaskStore {
       if (fields.status !== undefined) {
         task.status = fields.status;
         changedFields.push("status");
+        if ((fields.status === "pending" || fields.status === "in_progress") && task.verification) {
+          delete task.verification;
+          changedFields.push("verification");
+        }
       }
       if (fields.verification !== undefined) {
         task.verification = fields.verification.map(item => item.trim());

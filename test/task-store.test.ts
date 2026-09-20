@@ -54,6 +54,26 @@ describe("TaskStore (in-memory)", () => {
     expect(store.get("1")?.verification).toEqual(["tests passed"]);
   });
 
+  it("clears completion evidence when a task is reopened", () => {
+    store.create("Test", "Desc");
+    store.start("1");
+    store.update("1", { status: "completed", verification: ["tests passed"] });
+    store.update("1", { status: "pending" });
+    expect(store.get("1")?.verification).toBeUndefined();
+    store.start("1");
+    expect(store.get("1")?.verification).toBeUndefined();
+  });
+
+  it("clears stale execution metadata before a retry", () => {
+    store.create("Test", "Desc", undefined, {
+      agentType: "general-purpose",
+      result: "old output",
+      lastError: "old error",
+    });
+    store.start("1");
+    expect(store.get("1")?.metadata).toEqual({ agentType: "general-purpose" });
+  });
+
   it("gets a task by ID", () => {
     store.create("Test", "Desc");
     const task = store.get("1");

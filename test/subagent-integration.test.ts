@@ -499,6 +499,22 @@ describe("Completion listener", () => {
     expect(result.content[0].text).toContain("Status: completed");
   });
 
+  it("ignores a late completion after the task was reset", async () => {
+    await mock.executeTool("TaskCreate", {
+      subject: "Reset task",
+      description: "Desc",
+      agentType: "general-purpose",
+    });
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+    await mock.executeTool("TaskUpdate", { taskId: "1", status: "pending" });
+
+    mock.emitEvent("subagents:completed", { id: "agent-1", result: "late result" });
+
+    const result = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(result.content[0].text).toContain("Status: pending");
+    expect(result.content[0].text).not.toContain("late result");
+  });
+
   it("reverts task to pending on subagents:failed event", async () => {
     await mock.executeTool("TaskCreate", {
       subject: "Failing task",
