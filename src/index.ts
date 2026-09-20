@@ -1550,7 +1550,11 @@ Set up task dependencies:
         actions.push("✗ Delete");
         actions.push("← Back");
 
-        const title = `#${task.id} [${task.status}] ${task.subject}\n${task.description}`;
+        // The select dialog is a one-line prompt. A literal newline in its title is
+        // treated as output by some TUI renderers and gets appended on every redraw.
+        // Keep the full detail visible without giving the renderer a second line.
+        const title = `#${task.id} [${task.status}] ${task.subject} — ${task.description}`
+          .replace(/[\r\n]+/g, " ");
         const action = await ui.select(title, actions);
 
         if (action === "▸ Start (in_progress)") {

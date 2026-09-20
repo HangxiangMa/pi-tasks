@@ -128,6 +128,16 @@ describe("/tasks task detail", () => {
     expect((await mock.executeTool("TaskList", {})).content[0].text).toBe("No tasks found");
   });
 
+  it("keeps the task preview title on one line", async () => {
+    const { selects } = await runTasks([0, 0, undefined], async mock => {
+      await mock.executeTool("TaskCreate", {
+        subject: "Work",
+        description: "first line\nsecond line",
+      });
+    });
+    expect(selects[2].title).toBe("#1 [pending] Work — first line second line");
+  });
+
   it("offers Complete only for in-progress tasks", async () => {
     const { selects } = await runTasks([0, 0, undefined], create("Work"));
     expect(selects[2].choices).toEqual(["▸ Start (in_progress)", "✗ Delete", "← Back"]);
