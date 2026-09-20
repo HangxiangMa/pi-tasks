@@ -215,10 +215,12 @@ export function installSubagentsMock(
     stopped,
     consumed,
     notified,
-    /** Agent finished successfully. */
-    complete(agentId: string, result?: string) { settle("subagents:completed", agentId, { result }); },
+    /** Agent finished successfully. Usage mirrors the subagents event contract. */
+    complete(agentId: string, result?: string, usage?: unknown) { settle("subagents:completed", agentId, { result, ...(usage === undefined ? {} : { usage }) }); },
     /** Agent failed (or was stopped, with `status: "stopped"`). */
-    fail(agentId: string, error: string, status = "error") { settle("subagents:failed", agentId, { error, status }); },
+    fail(agentId: string, error: string, status = "error", usage?: unknown) {
+      settle("subagents:failed", agentId, { error, status, ...(usage === undefined ? {} : { usage }) });
+    },
     /** Wait past the notification hold, so `notified` is final. */
     afterNudgeHold() { return new Promise<void>(resolve => setTimeout(resolve, NUDGE_HOLD_MS * 2)); },
     unsub() { unsubPing(); unsubSpawn(); unsubStop(); unsubConsume(); },

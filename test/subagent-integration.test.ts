@@ -492,11 +492,15 @@ describe("Completion listener", () => {
     });
     await mock.executeTool("TaskExecute", { task_ids: ["1"] });
 
-    // Simulate agent completion
-    mock.emitEvent("subagents:completed", { id: "agent-1" });
+    // Simulate agent completion with the usage returned by pi-subagents.
+    mock.emitEvent("subagents:completed", {
+      id: "agent-1",
+      usage: { input: 1200, output: 340, cost: 0.0123 },
+    });
 
     const result = await mock.executeTool("TaskGet", { taskId: "1" });
     expect(result.content[0].text).toContain("Status: completed");
+    expect(result.content[0].text).toContain("Usage: ↑1200 ↓340 $0.0123");
   });
 
   it("ignores a late completion after the task was reset", async () => {
@@ -523,11 +527,17 @@ describe("Completion listener", () => {
     });
     await mock.executeTool("TaskExecute", { task_ids: ["1"] });
 
-    // Simulate agent failure
-    mock.emitEvent("subagents:failed", { id: "agent-1", error: "Out of turns", status: "error" });
+    // Simulate agent failure with partial usage; failed tasks still retain spend.
+    mock.emitEvent("subagents:failed", {
+      id: "agent-1",
+      error: "Out of turns",
+      status: "error",
+      usage: { input: 800, output: 90, cost: 0.0045 },
+    });
 
     const result = await mock.executeTool("TaskGet", { taskId: "1" });
     expect(result.content[0].text).toContain("Status: pending");
+    expect(result.content[0].text).toContain("Usage: ↑800 ↓90 $0.0045");
   });
 
   it("completes the task and keeps the partial result when the agent was stopped", async () => {

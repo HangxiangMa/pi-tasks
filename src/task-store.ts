@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { sortTasks, type TaskSortOrder } from "./task-sort.js";
-import type { Task, TaskStatus, TaskStoreData } from "./types.js";
+import { mergeTaskUsage, normalizeTaskUsage, type Task, type TaskStatus, type TaskStoreData, type TaskUsage } from "./types.js";
 
 const TASKS_DIR = join(homedir(), ".pi", "tasks");
 const LOCK_RETRY_MS = 50;
@@ -96,6 +96,7 @@ function normalizeTask(t: Task): Task {
     metadata: t.metadata && typeof t.metadata === "object" && !Array.isArray(t.metadata) ? t.metadata : {},
     blocks: Array.isArray(t.blocks) ? t.blocks : [],
     blockedBy: Array.isArray(t.blockedBy) ? t.blockedBy : [],
+    usage: normalizeTaskUsage(t.usage),
     createdAt: typeof t.createdAt === "number" ? t.createdAt : now,
     updatedAt: typeof t.updatedAt === "number" ? t.updatedAt : now,
   };
@@ -210,6 +211,49 @@ export class TaskStore {
     return this.tasks.get(id);
   }
 
+  /** Add execution usage atomically and keep it across completion/reload/retry. */
+  recordUsage(id: string, usage: TaskUsage): Task | undefined {
+    return this.withLock(() => {
+      const task = this.tasks.get(id);
+      if (!task) return undefined;
+      const delta = normalizeTaskUsage(usage);
+      if (!delta) return task;
+      task.usage = mergeTaskUsage(task.usage, delta);
+      task.updatedAt = Date.now();
+      return task;
+    });
+  }
+
+  /**
+   * Persist final usage and transition an agent task as one operation.
+   * The agent ID check prevents a late event from charging a retried run.
+   */
+  finalizeAgentTask(
+    id: string,
+    agentId: string,
+    status: TaskStatus,
+    usage: unknown,
+    verification: string | undefined,
+    metadata: Record<string, unknown>,
+  ): Task | undefined {
+    return this.withLock(() => {
+      const task = this.tasks.get(id);
+      if (!task || task.status !== "in_progress" || task.metadata?.agentId !== agentId) return undefined;
+      const delta = normalizeTaskUsage(usage);
+      if (delta) task.usage = mergeTaskUsage(task.usage, delta);
+      task.status = status;
+      if (verification) task.verification = [verification];
+      else delete task.verification;
+      delete task.owner;
+      for (const [key, value] of Object.entries(metadata)) {
+        if (value === null) delete task.metadata[key];
+        else task.metadata[key] = value;
+      }
+      task.updatedAt = Date.now();
+      return task;
+    });
+  }
+
   /** List all tasks, sorted by the given order (defaults to ID ascending). */
   list(sortOrder: TaskSortOrder = "id"): Task[] {
     if (this.filePath) this.load();
@@ -229,6 +273,7 @@ export class TaskStore {
       }
       task.status = "in_progress";
       delete task.verification;
+      delete task.owner;
       for (const key of ["result", "lastError"]) delete task.metadata[key];
       if (owner !== undefined) task.owner = owner;
       task.updatedAt = Date.now();
@@ -242,7 +287,7 @@ export class TaskStore {
     subject?: string;
     description?: string;
     activeForm?: string;
-    owner?: string;
+    owner?: string | null;
     metadata?: Record<string, any>;
     addBlocks?: string[];
     addBlockedBy?: string[];
@@ -268,6 +313,10 @@ export class TaskStore {
       if (fields.status !== undefined) {
         task.status = fields.status;
         changedFields.push("status");
+        if (fields.status === "pending" || fields.status === "completed") {
+          delete task.owner;
+          delete task.metadata.agentId;
+        }
         if ((fields.status === "pending" || fields.status === "in_progress") && task.verification) {
           delete task.verification;
           changedFields.push("verification");
@@ -290,7 +339,8 @@ export class TaskStore {
         changedFields.push("activeForm");
       }
       if (fields.owner !== undefined) {
-        task.owner = fields.owner;
+        if (fields.owner === null) delete task.owner;
+        else task.owner = fields.owner;
         changedFields.push("owner");
       }
 

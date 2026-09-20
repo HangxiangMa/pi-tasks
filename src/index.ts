@@ -173,6 +173,8 @@ export default function (pi: ExtensionAPI) {
   let cascadeConfig: { additionalContext?: string; model?: string; maxTurns?: number } | undefined;
   /** Maps agent IDs to task IDs for O(1) completion lookup. */
   const agentTaskMap = new Map<string, string>();
+  /** Ephemeral hand-off for reading a completed result after its identity is cleared. */
+  const completedAgentTaskMap = new Map<string, string>();
   function detachAgent(task: Task | undefined): void {
     const agentId = task?.metadata?.agentId;
     if (typeof agentId === "string") agentTaskMap.delete(agentId);
@@ -318,18 +320,24 @@ export default function (pi: ExtensionAPI) {
 
   // Success → mark task completed, cascade if enabled
   pi.events.on("subagents:completed", async (data) => {
-    const { id, result } = data as { id: string; result?: string };
+    const { id, result, usage } = data as { id: string; result?: string; usage?: unknown };
     const taskId = agentTaskMap.get(id);
     if (!taskId) return;
     agentTaskMap.delete(id);
     const task = store.get(taskId);
     if (!task || task.status !== "in_progress" || task.metadata?.agentId !== id) return;
 
-    store.update(task.id, {
-      status: "completed",
-      verification: ["Subagent completed successfully"],
-      metadata: { ...task.metadata, result },
-    });
+    const finalized = store.finalizeAgentTask(
+      task.id,
+      id,
+      "completed",
+      usage,
+      "Subagent completed successfully",
+      { result, agentId: null },
+    );
+    if (!finalized) return;
+    completedAgentTaskMap.set(task.id, id);
+    widget.syncUsage(task.id, finalized.usage);
     widget.setActiveTask(task.id, false);
 
     // Auto-cascade: find unblocked dependents with agentType
@@ -366,7 +374,13 @@ export default function (pi: ExtensionAPI) {
   // Failure → store error, revert to pending, don't cascade (branch stops)
   // Intentional stop (status === "stopped") → mark completed, preserve partial result
   pi.events.on("subagents:failed", (data) => {
-    const { id, error, result, status } = data as { id: string; error?: string; result?: string; status: string };
+    const { id, error, result, status, usage } = data as {
+      id: string;
+      error?: string;
+      result?: string;
+      status: string;
+      usage?: unknown;
+    };
     const taskId = agentTaskMap.get(id);
     if (!taskId) return;
     agentTaskMap.delete(id);
@@ -374,18 +388,32 @@ export default function (pi: ExtensionAPI) {
     if (!task || task.status !== "in_progress" || task.metadata?.agentId !== id) return;
 
     if (status === "stopped") {
-      // Intentional stop — mark completed, preserve partial result
-      store.update(task.id, {
-         status: "completed",
-         verification: ["Subagent stopped intentionally"],
-         metadata: { ...task.metadata, result: result || task.metadata?.result },
-       });
+      // Intentional stop — mark completed, preserve partial result.
+      const finalized = store.finalizeAgentTask(
+        task.id,
+        id,
+        "completed",
+        usage,
+        "Subagent stopped intentionally",
+        { result: result || task.metadata?.result, agentId: null },
+      );
+      if (!finalized) return;
+      completedAgentTaskMap.set(task.id, id);
+      widget.syncUsage(task.id, finalized.usage);
       autoClear.trackCompletion(task.id, cadence.currentTurn);
     } else {
-      // Actual error — revert to pending. `result: null` drops it (the store deletes
-      // a key set to null): a task back to pending has no current result, and an
-      // earlier run's would otherwise outrank this error everywhere it is read.
-      store.update(task.id, { status: "pending", metadata: { ...task.metadata, result: null, lastError: error || status } });
+      // Actual error — revert to pending while retaining cumulative spend.
+      const finalized = store.finalizeAgentTask(
+        task.id,
+        id,
+        "pending",
+        usage,
+        undefined,
+        { result: null, lastError: error || status, agentId: null },
+      );
+      if (!finalized) return;
+      completedAgentTaskMap.set(task.id, id);
+      widget.syncUsage(task.id, finalized.usage);
       autoClear.resetBatchCountdown();
     }
     widget.setActiveTask(task.id, false);
@@ -445,9 +473,8 @@ export default function (pi: ExtensionAPI) {
    *  the tasks would stay in_progress forever. Everything needed is already on disk:
    *  TaskExecute records the agent ID in task metadata.
    *
-   *  Only in_progress tasks are relinked. A task reverted to pending keeps its
-   *  `metadata.agentId`, and relinking that would let a late event resurrect work the
-   *  user has already reset. Only runs once — the first caller wins. */
+   *  Only in_progress tasks are relinked. Pending and completed tasks clear their
+   *  current-run identity, so late events cannot resurrect or charge them. */
   function reattachAgents() {
     if (agentsReattached) return;
     agentsReattached = true;
@@ -938,6 +965,10 @@ Returns full task details:
       if (task.verification?.length) {
         lines.push(`Verification: ${JSON.stringify(task.verification)}`);
       }
+      if (task.usage) {
+        const estimated = task.usage.costEstimated ? "~" : "";
+        lines.push(`Usage: ↑${task.usage.inputTokens} ↓${task.usage.outputTokens} ${estimated}$${task.usage.cost.toFixed(4)}`);
+      }
 
       if (task.blockedBy.length > 0) {
         const openBlockers = task.blockedBy.filter(bid => {
@@ -1176,17 +1207,19 @@ Set up task dependencies:
         const task = store.get(resolvedId);
         if (!task) throw new Error(`No task found with ID ${task_id}`);
 
-        if (task.metadata?.agentId) {
-          // Subagent task — wait for completion if blocking
+        const agentId = task.metadata?.agentId ?? completedAgentTaskMap.get(resolvedId);
+        if (agentId) {
+          // Subagent task — wait for completion if blocking. Capture the ID before
+          // the completion listener clears current-run metadata on the task object.
           if (block && task.status === "in_progress") {
             await new Promise<void>((resolve) => {
               const timer = setTimeout(() => { unsubOk(); unsubFail(); resolve(); }, timeout ?? 30000);
               const cleanup = () => { clearTimeout(timer); resolve(); };
               const unsubOk = pi.events.on("subagents:completed", (d: unknown) => {
-                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
+                if ((d as any).id === agentId) { unsubOk(); unsubFail(); cleanup(); }
               });
               const unsubFail = pi.events.on("subagents:failed", (d: unknown) => {
-                if ((d as any).id === task.metadata?.agentId) { unsubOk(); unsubFail(); cleanup(); }
+                if ((d as any).id === agentId) { unsubOk(); unsubFail(); cleanup(); }
               });
               // Re-read before committing to the wait. Nothing awaits since the outer
               // check, so this only differs on a shared file-backed list, where
@@ -1199,18 +1232,23 @@ Set up task dependencies:
           // Re-read by resolved ID — `task` predates the wait, and a file-backed
           // store deserializes a fresh object on every load, so it is stale here.
           const updated = store.get(resolvedId) ?? task;
-          const agentId: string = task.metadata.agentId;
           // Consume only what is actually handed over: the agent has reported back
           // (it leaves the map when it does) and the task carries its outcome. Short
           // of both — still running, or an update that never landed — the model is
           // getting a status, and the notification pi-subagents is holding is the
           // only thing that will announce the result.
-          if (!agentTaskMap.has(agentId) && updated.status !== "in_progress") consumeSubagentResult(agentId);
+          if (!agentTaskMap.has(agentId) && updated.status !== "in_progress") {
+            consumeSubagentResult(agentId);
+            completedAgentTaskMap.delete(resolvedId);
+          }
           const output = updated.metadata?.result
             ?? (updated.metadata?.lastError ? `Error: ${updated.metadata.lastError}` : undefined);
           return textResult(
             `Task #${resolvedId} [${updated.status}] — subagent ${agentId}${output ? `\n\n${output}` : ""}`,
           );
+        }
+        if (task.status === "completed" || task.metadata?.result !== undefined || task.metadata?.lastError !== undefined) {
+          return textResult(`Task #${resolvedId} [${task.status}]`);
         }
         throw new Error(`No background process for task ${task_id}`);
       }
@@ -1367,6 +1405,7 @@ Set up task dependencies:
         }
 
         // Atomically claim task before spawning agent via RPC.
+        completedAgentTaskMap.delete(taskId);
         const startResult = store.start(taskId);
         if (startResult.error) {
           results.push(`#${taskId}: ${startResult.error}`);

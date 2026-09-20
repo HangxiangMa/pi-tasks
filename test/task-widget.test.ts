@@ -100,6 +100,15 @@ describe("TaskWidget", () => {
     expect(lines[1]).toContain("~~#1 Done task~~");
   });
 
+  it("keeps persisted usage visible after a task completes", () => {
+    store.create("Costed task", "Desc");
+    store.recordUsage("1", { inputTokens: 1200, outputTokens: 340, cost: 0.0123 });
+    store.update("1", { status: "completed" });
+    widget.update();
+
+    expect(renderWidget(ui.state)[1]).toContain("↑1.2k ↓340 $0.0123");
+  });
+
   it("renders active tasks with spinner icon", () => {
     store.create("Running thing", "Desc", "Processing data");
     store.update("1", { status: "in_progress" });
@@ -527,9 +536,9 @@ describe("TaskWidget", () => {
     widget.addTokenUsage(100, 50);
 
     const lines = renderWidget(ui.state);
-    // Both tasks should have the same token counts
-    expect(lines[1]).toContain("↑ 100");
-    expect(lines[2]).toContain("↑ 100");
+    // Shared host usage is split so the two rows do not double-count it.
+    expect(lines[1]).toContain("↑ 50");
+    expect(lines[2]).toContain("↑ 50");
   });
 
   it("dispose clears widget and timer", () => {

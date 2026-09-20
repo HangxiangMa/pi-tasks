@@ -365,8 +365,8 @@ The returned `id` is stored in an in-memory `agentTaskMap` (agentId → taskId) 
 
 | Event | Payload | Action |
 |-------|---------|--------|
-| `subagents:completed` | `{ id, result? }` | Mark task `completed`, trigger auto-cascade if enabled |
-| `subagents:failed` | `{ id, error?, status }` | Revert task to `pending`, store error in metadata |
+| `subagents:completed` | `{ id, result?, usage? }` | Persist usage, mark task `completed`, trigger auto-cascade if enabled |
+| `subagents:failed` | `{ id, error?, status, usage? }` | Persist partial usage, revert task to `pending` (or complete an intentional stop), store error in metadata |
 
 ### Joining a Subagent
 

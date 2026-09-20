@@ -18,7 +18,7 @@ import type { TasksConfig } from "../tasks-config.js";
 
 // ---- Truncation ----
 
-import type { Task } from "../types.js";
+import { normalizeTaskUsage, type Task, type TaskUsage } from "../types.js";
 
 function truncateFromTop(tasks: Task[], limit: number): Task[] {
   return tasks.slice(-limit);
@@ -50,11 +50,8 @@ export type UICtx = {
 const DEFAULT_MAX_VISIBLE_TASKS = 10;
 
 /** Per-task runtime metrics (elapsed time, token usage). */
-export interface TaskMetrics {
+export interface TaskMetrics extends TaskUsage {
   startedAt: number;
-  inputTokens: number;
-  outputTokens: number;
-  cost: number;
 }
 
 /** Format milliseconds as a human-readable duration (e.g., "2m 49s", "1h 3m"). */
@@ -73,6 +70,16 @@ function formatDuration(ms: number): string {
 function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+}
+
+function formatUsage(usage: TaskUsage | undefined): string {
+  if (!usage) return "";
+  const parts = [
+    usage.inputTokens > 0 ? `↑${formatTokens(usage.inputTokens)}` : "",
+    usage.outputTokens > 0 ? `↓${formatTokens(usage.outputTokens)}` : "",
+    usage.cost > 0 ? `${usage.costEstimated ? "~" : ""}$${usage.cost.toFixed(4)}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? ` (${parts.join(" ")})` : "";
 }
 
 // ---- Widget ----
@@ -96,6 +103,9 @@ export class TaskWidget {
   ) {}
 
   setStore(store: TaskStore) {
+    if (this.store === store) return;
+    this.activeTaskIds.clear();
+    this.metrics.clear();
     this.store = store;
   }
 
@@ -108,7 +118,8 @@ export class TaskWidget {
     if (taskId && active) {
       this.activeTaskIds.add(taskId);
       if (!this.metrics.has(taskId)) {
-        this.metrics.set(taskId, { startedAt: Date.now(), inputTokens: 0, outputTokens: 0, cost: 0 });
+        const usage = this.store.get(taskId)?.usage;
+        this.metrics.set(taskId, { startedAt: Date.now(), ...(usage ?? { inputTokens: 0, outputTokens: 0, cost: 0 }) });
       }
       this.ensureTimer();
     } else if (taskId) {
@@ -119,17 +130,36 @@ export class TaskWidget {
 
   /** Record token usage for the currently active task(s). */
   addTokenUsage(inputTokens: number, outputTokens: number, cost = 0) {
-    // Distribute usage to all currently active tasks. The host turn can contain
-    // several task tool calls, so this is the only reliable attribution point.
-    for (const id of this.activeTaskIds) {
-      const m = this.metrics.get(id);
-      if (m) {
-        m.inputTokens += inputTokens;
-        m.outputTokens += outputTokens;
-        m.cost += cost;
-      }
+    const ids = [...this.activeTaskIds];
+    const count = ids.length;
+    if (count === 0) return;
+    const normalized = normalizeTaskUsage({ inputTokens, outputTokens, cost });
+    if (!normalized) return;
+    for (let i = 0; i < count; i++) {
+      const usage: TaskUsage = {
+        inputTokens: Math.floor(normalized.inputTokens / count) + (i < normalized.inputTokens % count ? 1 : 0),
+        outputTokens: Math.floor(normalized.outputTokens / count) + (i < normalized.outputTokens % count ? 1 : 0),
+        cost: normalized.cost / count,
+        ...(count > 1 ? { costEstimated: true } : {}),
+      };
+      this.recordUsage(ids[i], usage);
     }
     this.update();
+  }
+
+  /** Sync live metrics after a store mutation that already persisted usage. */
+  syncUsage(taskId: string, usage: TaskUsage | undefined) {
+    if (!usage) return;
+    const current = this.metrics.get(taskId);
+    if (current) Object.assign(current, usage);
+    else this.metrics.set(taskId, { startedAt: Date.now(), ...usage });
+  }
+
+  /** Persist usage returned by a subagent before its task leaves active state. */
+  recordUsage(taskId: string, usage: TaskUsage) {
+    const task = this.store.recordUsage(taskId, usage);
+    if (!task) return;
+    this.syncUsage(taskId, task.usage);
   }
 
   /** Ensure the widget update timer is running. The spinner advances here and
@@ -243,7 +273,7 @@ export class TaskWidget {
           const tokenParts: string[] = [];
           if (m.inputTokens > 0) tokenParts.push(`${glyphs.inputTokens} ${formatTokens(m.inputTokens)}`);
           if (m.outputTokens > 0) tokenParts.push(`${glyphs.outputTokens} ${formatTokens(m.outputTokens)}`);
-          if (m.cost > 0) tokenParts.push(`$${m.cost.toFixed(4)}`);
+          if (m.cost > 0) tokenParts.push(`${m.costEstimated ? "~" : ""}$${m.cost.toFixed(4)}`);
           stats = tokenParts.length > 0
             ? ` ${theme.fg("dim", `(${elapsed} ${glyphs.statsSeparator} ${tokenParts.join(" ")})`)}`
             : ` ${theme.fg("dim", `(${elapsed})`)}`;
@@ -252,12 +282,12 @@ export class TaskWidget {
           theme.fg("accent", form + agentLabel + glyphs.trailingEllipsis)
         }${stats}`;
       } else if (task.status === "completed") {
-        text = `  ${statusGlyph} ${theme.fg("dim", theme.strikethrough("#" + task.id + " " + task.subject))}`;
+        text = `  ${statusGlyph} ${theme.fg("dim", theme.strikethrough("#" + task.id + " " + task.subject))}${theme.fg("dim", formatUsage(task.usage))}`;
       } else {
         const agentSuffix = task.status === "in_progress" && task.metadata?.agentId
           ? theme.fg("dim", ` (agent ${task.metadata.agentId.slice(0, 5)})`)
           : "";
-        text = `  ${statusGlyph} ${theme.fg("dim", "#" + task.id)} ${task.subject}${agentSuffix}`;
+        text = `  ${statusGlyph} ${theme.fg("dim", "#" + task.id)} ${task.subject}${agentSuffix}${theme.fg("dim", formatUsage(task.usage))}`;
       }
 
       lines.push(truncate(text + suffix));

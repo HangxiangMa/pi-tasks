@@ -451,6 +451,16 @@ describe("TaskStore (file-backed)", () => {
     expect(store2.list()).toHaveLength(2);
   });
 
+  it("persists accumulated usage across reloads", () => {
+    const store1 = new TaskStore(testListId);
+    store1.create("Costed task", "Desc");
+    store1.recordUsage("1", { inputTokens: 100, outputTokens: 20, cost: 0.001 });
+    store1.recordUsage("1", { inputTokens: 50, outputTokens: 10, cost: 0.002 });
+
+    const store2 = new TaskStore(testListId);
+    expect(store2.get("1")?.usage).toEqual({ inputTokens: 150, outputTokens: 30, cost: 0.003 });
+  });
+
   it("restores all tasks across instances", () => {
     const store1 = new TaskStore(testListId);
     store1.create("Pending", "Desc");
