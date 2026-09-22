@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import initExtension from "../src/index.js";
-import { mockPi } from "./helpers/mock-pi.js";
+import { mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
 
 beforeEach(() => {
   process.env.PI_TASKS = "off";
@@ -106,6 +106,20 @@ describe("task lifecycle enforcement", () => {
 
     const task = await mock.executeTool("TaskGet", { taskId: "1" });
     expect(task.content[0].text).toContain("Status: in_progress");
+  });
+
+  it("releases local tasks left behind when shutdown was skipped", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Interrupted work", description: "Desc" });
+    await mock.executeToolRaw("TaskStart", { taskId: "1" });
+
+    // A reload is the recovery path for a killed host: session_shutdown never ran.
+    await mock.fireLifecycle("session_start", { reason: "reload" }, mockSessionCtx("s1"));
+
+    const task = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(task.content[0].text).toContain("Status: pending");
   });
 
   it("requires active status and verification evidence before completion", async () => {

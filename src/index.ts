@@ -467,6 +467,24 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  /** Release local tasks left active by a killed/crashed host.
+   *  `session_shutdown` normally does this, but termination can skip that event.
+   *  Local tasks have no external worker that can finish them later, so keeping
+   *  them in_progress across reloads makes the list permanently stale. */
+  function reconcileOrphanedLocalTasks(): boolean {
+    let reconciled = false;
+    for (const task of store.list()) {
+      if (task.status !== "in_progress" || task.metadata?.agentId) continue;
+      const updated = store.update(task.id, { status: "pending" });
+      if (!updated.error) {
+        widget.setActiveTask(task.id, false);
+        reconciled = true;
+      }
+    }
+    if (reconciled) autoClear.resetBatchCountdown();
+    return reconciled;
+  }
+
   /** Re-link persisted in-progress tasks to the subagents still running for them.
    *  `agentTaskMap` lives only in this extension instance, so a reload starts empty
    *  while the agents keep going — their completion events would then be dropped and
@@ -513,19 +531,7 @@ export default function (pi: ExtensionAPI) {
    * `reattachAgents()` is responsible for reconciling those tasks.
    */
   pi.on("session_shutdown", async () => {
-    let reconciled = false;
-    for (const task of store.list()) {
-      if (task.status !== "in_progress" || task.metadata?.agentId) continue;
-      const updated = store.update(task.id, { status: "pending" });
-      if (!updated.error) {
-        widget.setActiveTask(task.id, false);
-        reconciled = true;
-      }
-    }
-    if (reconciled) {
-      autoClear.resetBatchCountdown();
-      widget.update();
-    }
+    if (reconcileOrphanedLocalTasks()) widget.update();
   });
 
   // ── Turn tracking for system-reminder injection ──
@@ -709,6 +715,9 @@ export default function (pi: ExtensionAPI) {
 
     initializeStoreForContext(ctx, true);
     if (forkSeed?.tasks.length) store.seed(forkSeed); // carry the parent's tasks into the fork
+    // A hard-killed host never emits session_shutdown. Reconcile local work before
+    // rendering it; agent-backed work is deliberately left for reattachment.
+    reconcileOrphanedLocalTasks();
     reattachAgents(); // subagents outlive a reload; relink them before events arrive
     // resume/reload/fork keep tasks; startup/new auto-clear an all-completed list.
     const keepsTasks = reason === "reload" || reason === "resume" || reason === "fork";
