@@ -77,6 +77,18 @@ describe("task lifecycle enforcement", () => {
     expect(result.content[0].text).toContain("Task #2 is blocked by #1");
   });
 
+  it("releases uncompleted local tasks when the agent settles", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Local work", description: "Desc" });
+    await mock.executeToolRaw("TaskStart", { taskId: "1" });
+    await mock.fireLifecycle("agent_settled", {});
+
+    const task = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(task.content[0].text).toContain("Status: pending");
+  });
+
   it("releases uncompleted local tasks when the session shuts down", async () => {
     const mock = mockPi();
     initExtension(mock.pi as any);

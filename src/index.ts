@@ -554,11 +554,13 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // The end of a run is the only signal that separates a new batch of tasks from the
-  // same batch still being built — the store looks identical either way. Nothing is
-  // cleared here; this only marks the boundary for the next TaskCreate.
+  // A settled run is no longer actively executing local work. Release any local
+  // task the model forgot to close so it cannot persist as a false in_progress task;
+  // the next turn can explicitly TaskStart it again if the work continues. Agent-
+  // backed tasks stay active until their completion event.
   pi.on("agent_settled", async () => {
     autoClear.onRunEnded();
+    if (reconcileOrphanedLocalTasks()) widget.update();
     const unresolved = store.list().filter(task => task.status !== "completed");
     if (unresolved.length > 0) {
       cadence.reminderDue = true;
