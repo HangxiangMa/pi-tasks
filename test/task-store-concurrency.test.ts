@@ -98,6 +98,14 @@ describe("TaskStore — shared file access", () => {
     expect(b.get("1")).toBeUndefined();
   });
 
+  it("does not delete tasks written after its local empty snapshot", () => {
+    const staleEmpty = new TaskStore(file);
+    new TaskStore(file).create("Concurrent task", "d");
+
+    expect(staleEmpty.deleteFileIfEmpty()).toBe(false);
+    expect(new TaskStore(file).list().map(t => t.subject)).toEqual(["Concurrent task"]);
+  });
+
   it("reclaims a lock left behind by a dead process", () => {
     // A crashed session leaves its lock file on disk. Without stale-lock detection
     // every later mutation would block for the full retry budget and then throw.

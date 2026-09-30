@@ -448,9 +448,16 @@ export class TaskStore {
 
   /** Delete the backing file (if file-backed and empty). */
   deleteFileIfEmpty(): boolean {
-    if (!this.filePath || this.tasks.size > 0) return false;
-    try { unlinkSync(this.filePath); } catch { /* ignore */ }
-    return true;
+    if (!this.filePath || !this.lockPath) return false;
+    const token = acquireLock(this.lockPath);
+    try {
+      this.load();
+      if (this.tasks.size > 0) return false;
+      try { unlinkSync(this.filePath); } catch { /* already absent */ }
+      return true;
+    } finally {
+      releaseLock(this.lockPath, token);
+    }
   }
 
   /** Remove all completed tasks. */
