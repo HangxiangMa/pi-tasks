@@ -19,6 +19,7 @@ import { TaskStore } from "../src/task-store.js";
 // runs while the store holds the lock — the only way to stage a lock changing hands
 // mid-operation, since acquire and release are both internal to withLock.
 const renameHook = vi.hoisted(() => ({ current: null as null | (() => void) }));
+const lockAcquireHook = vi.hoisted(() => ({ current: null as null | (() => void) }));
 vi.mock("node:fs", async importOriginal => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
@@ -27,6 +28,15 @@ vi.mock("node:fs", async importOriginal => {
     renameSync: (...args: Parameters<typeof actual.renameSync>) => {
       renameHook.current?.();
       return actual.renameSync(...args);
+    },
+    writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
+      const options = args[2];
+      if (typeof options === "object" && options?.flag === "wx") {
+        const hook = lockAcquireHook.current;
+        lockAcquireHook.current = null;
+        hook?.();
+      }
+      return actual.writeFileSync(...args);
     },
   };
 });
@@ -207,6 +217,22 @@ describe("TaskStore — snapshot and seed", () => {
     reopened.seed(snapshot);
 
     expect(reopened.list().map(t => t.subject)).toEqual(["One"]);
+  });
+
+  it("preserves a task created immediately before the seed lock is acquired", () => {
+    const parent = new TaskStore(file);
+    parent.create("Snapshot task", "d");
+
+    const childFile = join(dir, "child.json");
+    const child = new TaskStore(childFile);
+    lockAcquireHook.current = () => { new TaskStore(childFile).create("Concurrent task", "d"); };
+    try {
+      child.seed(parent.snapshot());
+    } finally {
+      lockAcquireHook.current = null;
+    }
+
+    expect(new TaskStore(childFile).list().map(t => t.subject)).toEqual(["Concurrent task"]);
   });
 
   it("does not write the parent's file when the seeded copy is mutated", () => {

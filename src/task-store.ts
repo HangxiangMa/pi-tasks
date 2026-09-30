@@ -438,8 +438,8 @@ export class TaskStore {
   /** Seed an empty store from a snapshot. No-op if the store already has tasks,
    *  so re-pointing to an already-seeded fork file never duplicates. */
   seed(data: TaskStoreData): void {
-    if (this.tasks.size > 0) return;
     this.withLock(() => {
+      if (this.tasks.size > 0) return;
       this.nextId = data.nextId;
       this.tasks.clear();
       for (const t of data.tasks) this.tasks.set(t.id, t);
