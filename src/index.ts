@@ -74,6 +74,18 @@ function sanitizeField(value: string): string {
   return value.replace(/[\r\n]+/g, " ").replace(/<\/?system-reminder>/gi, "").trim();
 }
 
+/** `agentId` is written only by this extension's own spawn/finalize paths (via direct
+ *  `store.update()` calls that bypass tool dispatch) to mark a task as agent-backed for
+ *  shutdown/reload reconciliation. TaskCreate/TaskUpdate accept arbitrary metadata from
+ *  the model, so a caller setting `agentId` itself could make an ordinary task permanently
+ *  skip orphan recovery with no real subagent ever able to complete it. Strip it from any
+ *  metadata arriving through the public tool surface before it reaches the store. */
+function stripReservedMetadata(metadata: Record<string, any> | undefined): Record<string, any> | undefined {
+  if (!metadata || !("agentId" in metadata)) return metadata;
+  const { agentId: _agentId, ...rest } = metadata;
+  return rest;
+}
+
 /**
  * Build the system reminder, shaped after Claude Code's todo reminders: an
  * empty-list nudge, or a state echo that dumps the current list as JSON. The
@@ -824,7 +836,7 @@ All tasks are created with status \`pending\`.
       // cannot be relied on for that: they only tick at `turn_start`, so a run that ends
       // right after its last completion freezes one mid-count.
       autoClear.startNewBatch();
-      const meta = params.metadata ?? {};
+      const meta = stripReservedMetadata(params.metadata) ?? {};
       if (params.agentType) meta.agentType = params.agentType;
       const task = store.create(params.subject, params.description, params.activeForm, Object.keys(meta).length > 0 ? meta : undefined, params.todoId);
       widget.update();
@@ -1109,6 +1121,7 @@ Set up task dependencies:
 
     execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { taskId, ...fields } = params;
+      fields.metadata = stripReservedMetadata(fields.metadata);
       const current = store.get(taskId);
       if (fields.status === "completed") {
         if (!current) return Promise.resolve(textResult(`Task #${taskId} update rejected: Task #${taskId} not found`));

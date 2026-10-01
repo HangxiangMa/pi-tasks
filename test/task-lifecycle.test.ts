@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import initExtension from "../src/index.js";
-import { mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
+import { installSubagentsMock, mockPi, mockSessionCtx } from "./helpers/mock-pi.js";
 
 beforeEach(() => {
   process.env.PI_TASKS = "off";
@@ -105,19 +105,56 @@ describe("task lifecycle enforcement", () => {
 
   it("does not release agent-backed tasks before their completion event", async () => {
     const mock = mockPi();
+    const rpc = installSubagentsMock(mock.pi);
     initExtension(mock.pi as any);
 
+    // Legitimate agent-backed task: `agentId` is set internally by TaskExecute's
+    // own spawn path, never by the model through tool params.
     await mock.executeTool("TaskCreate", {
       subject: "Agent work",
       description: "Desc",
-      metadata: { agentId: "agent-1" },
+      agentType: "general-purpose",
+    });
+    await mock.executeTool("TaskExecute", { task_ids: ["1"] });
+
+    await mock.fireLifecycle("session_shutdown", {});
+
+    const task = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(task.content[0].text).toContain("Status: in_progress");
+    rpc.unsub();
+  });
+
+  it("cannot be made agent-backed by a caller-supplied agentId in metadata", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    // A forged `agentId` in TaskCreate's metadata must not exempt this task from
+    // ordinary local-task reconciliation — no real subagent will ever complete it.
+    await mock.executeTool("TaskCreate", {
+      subject: "Forged agent id",
+      description: "Desc",
+      metadata: { agentId: "not-a-real-agent" },
     });
     await mock.executeToolRaw("TaskStart", { taskId: "1" });
 
     await mock.fireLifecycle("session_shutdown", {});
 
     const task = await mock.executeTool("TaskGet", { taskId: "1" });
-    expect(task.content[0].text).toContain("Status: in_progress");
+    expect(task.content[0].text).toContain("Status: pending");
+  });
+
+  it("cannot be made agent-backed by a caller-supplied agentId via TaskUpdate", async () => {
+    const mock = mockPi();
+    initExtension(mock.pi as any);
+
+    await mock.executeTool("TaskCreate", { subject: "Forged agent id", description: "Desc" });
+    await mock.executeToolRaw("TaskStart", { taskId: "1" });
+    await mock.executeTool("TaskUpdate", { taskId: "1", metadata: { agentId: "not-a-real-agent" } });
+
+    await mock.fireLifecycle("session_shutdown", {});
+
+    const task = await mock.executeTool("TaskGet", { taskId: "1" });
+    expect(task.content[0].text).toContain("Status: pending");
   });
 
   it("releases local tasks left behind when shutdown was skipped", async () => {
